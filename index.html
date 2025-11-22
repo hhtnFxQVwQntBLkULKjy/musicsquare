@@ -987,7 +987,10 @@
   // 音乐逻辑：咪咕 + 网易云 双源
   (function () {
     const API_MIGU = "https://api.cenguigui.cn/api/mg_music/";
-    const API_NETEASE = "https://api.cenguigui.cn/api/music/netease/WyY_Dg.php";
+    // 网易云：新接口拆成“搜索 + 详情”
+    const API_NETEASE_SEARCH = "https://api.cenguigui.cn/api/music/netease/WyY_Dg.php";
+    const API_NETEASE_DETAIL = "https://api.cenguigui.cn/api/netease/music_v1.php";
+
     const NETEASE_LIMIT = 20;
 
     const searchForm = document.getElementById("searchForm");
@@ -1343,6 +1346,7 @@
       searchSongs(q);
     });
 
+    // 搜索：咪咕 text + 网易云 JSON
     async function searchSongs(query) {
       const t = langStaticTexts[currentLang];
       try {
@@ -1352,26 +1356,37 @@
           encodeURIComponent(query) +
           "&type=text";
 
+        // 网易云新搜索接口：返回 JSON，带 songid
         const neteaseUrl =
-          API_NETEASE +
-          "?type=text&msg=" +
+          API_NETEASE_SEARCH +
+          "?type=json&msg=" +
           encodeURIComponent(query) +
           "&num=" +
           NETEASE_LIMIT +
-          "&n=";
+          "&n="; // 按你给的示例保留 &n=
 
         const [miguResp, neteaseResp] = await Promise.all([
           fetch(miguUrl),
           fetch(neteaseUrl)
         ]);
 
-        const [miguText, neteaseText] = await Promise.all([
+        const [miguText, neteaseJson] = await Promise.all([
           miguResp.text(),
-          neteaseResp.text()
+          neteaseResp.json()
         ]);
 
         const miguListRaw = parseSearchResultText(miguText);
-        const neteaseListRaw = parseSearchResultText(neteaseText);
+
+        // 把网易云 JSON 统一成 { index, title, singer, songid } 的格式
+        let neteaseListRaw = [];
+        if (neteaseJson && neteaseJson.code === 200 && Array.isArray(neteaseJson.data)) {
+          neteaseListRaw = neteaseJson.data.map((it) => ({
+            index: it.n,
+            title: it.title,
+            singer: it.singer,
+            songid: it.songid
+          }));
+        }
 
         lastSearchSources = {
           hasMigu: miguListRaw.length > 0,
@@ -1398,7 +1413,8 @@
             title: it.title,
             singer: it.singer,
             source: "netease",
-            apiIndex: it.index
+            apiIndex: it.index,
+            songid: it.songid  // 关键：后面请求详情要用 songid
           });
         });
 
@@ -1416,8 +1432,8 @@
       }
     }
 
+    // 兼容 “1. 歌名 -- 歌手” 文本格式（用于咪咕）
     function parseSearchResultText(text) {
-      // 兼容 "1. 歌名 -- 歌手" 和 "1、歌名 -- 歌手"
       const lines = text
         .split("\n")
         .map((l) => l.trim())
@@ -1497,7 +1513,8 @@
           source: item.source,
           apiIndex: item.apiIndex,
           title: item.title,
-          singer: item.singer
+          singer: item.singer,
+          songid: item.songid || null
         };
 
         const playBtn = document.createElement("button");
@@ -1577,25 +1594,45 @@
         : t.playlistEmpty;
     }
 
+    // 详情：根据 source 决定走哪个接口
     async function fetchSongDetail(item) {
       if (item.source === "netease") {
+        // 新逻辑：通过 songid 调用 music_v1.php
+        if (!item.songid) {
+          throw new Error("Missing NetEase songid");
+        }
+
         const url =
-          API_NETEASE +
-          "?type=json&br=4&msg=" +
-          encodeURIComponent(item.query) +
-          "&num=" +
-          NETEASE_LIMIT +
-          "&n=" +
-          item.apiIndex;
+          API_NETEASE_DETAIL +
+          "?id=" +
+          encodeURIComponent(item.songid) +
+          "&type=json&level=lossless";
+
         const resp = await fetch(url);
         const json = await resp.json();
+
         if (json.code !== 200 || !json.data) {
-          throw new Error(json.msg || "Netease error");
+          throw new Error(json.msg || "Netease detail error");
         }
-        const data = json.data;
+
+        const raw = json.data || {};
+
+        // 这里字段名是根据常见第三方网易云接口推测的，
+        // 如果实际返回字段不一样，你只需要在此处改映射即可。
+        const data = {
+          title: raw.title || raw.name || item.title,
+          singer: raw.singer || raw.artist || raw.artists || item.singer,
+          cover: raw.cover || raw.pic || raw.picUrl || null,
+          music_url: raw.url || raw.music_url || raw.music || raw.play_url || null,
+          lrc_url: raw.lrc_url || raw.lrc || raw.lyric || null,
+          lrc: raw.lrc_text || null,
+          link: raw.page || raw.link || raw.page_url || null
+        };
+
         data._source = "netease";
         return data;
       } else {
+        // 咪咕保持原来的 JSON 逻辑
         const url =
           API_MIGU +
           "?msg=" +
@@ -1618,12 +1655,16 @@
       const t = langStaticTexts[currentLang];
       lastQuery = item.query;
 
-      let pos = playlist.findIndex(
-        (p) =>
-          p.query === item.query &&
-          p.apiIndex === item.apiIndex &&
-          p.source === item.source
-      );
+      // 播放列表中查找是否已存在该歌曲：
+      // 对网易云优先用 songid 匹配，避免重复。
+      let pos = playlist.findIndex((p) => {
+        if (p.source !== item.source) return false;
+        if (item.source === "netease" && item.songid && p.songid) {
+          return p.songid === item.songid;
+        }
+        return p.query === item.query && p.apiIndex === item.apiIndex;
+      });
+
       if (pos === -1) {
         playlist.push(item);
         pos = playlist.length - 1;
@@ -1689,18 +1730,24 @@
         songStatusShort.textContent = t.statePlaying;
       }
 
-      if (data.cover) coverImg.src = data.cover;
+      // 封面兜底：兼容 cover / pic / picUrl
+      const cover = data.cover || data.pic || data.picUrl;
+      if (cover) coverImg.src = cover;
 
-      if (data.music_url) {
-        audioEl.src = data.music_url;
-        downloadMusicBtn.href = data.music_url;
+      // 播放地址兜底：兼容 music_url / url / music / play_url
+      const musicUrl = data.music_url || data.url || data.music || data.play_url;
+      if (musicUrl) {
+        audioEl.src = musicUrl;
+        downloadMusicBtn.href = musicUrl;
         downloadMusicBtn.download = (data.title || "music") + ".mp3";
       } else {
         audioEl.removeAttribute("src");
         downloadMusicBtn.href = "#";
       }
 
-      if (data.link) openOriginBtn.href = data.link;
+      // 原始页面兜底：兼容 link / page / page_url
+      const pageLink = data.link || data.page || data.page_url;
+      if (pageLink) openOriginBtn.href = pageLink;
       else openOriginBtn.href = "#";
 
       const type = data._source || data.source || "migu";
