@@ -5,766 +5,131 @@
   <title>皮卡丘的音乐站</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui,
         -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
       background: radial-gradient(circle at top, #1a2a4a 0%, #050814 60%, #020308 100%);
-      color: #f7f7ff;
-      overflow-x: hidden;
-      overflow-y: auto;
+      color: #f7f7ff; overflow-x: hidden; overflow-y: auto;
     }
-
-    #bgCanvas {
-      position: fixed;
-      inset: 0;
-      z-index: -1;
-      background: transparent;
-    }
-
-    .main-wrapper {
-      position: relative;
-      z-index: 1;
-      min-height: 100vh;
-      padding: 24px;
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
-    }
-
+    #bgCanvas { position: fixed; inset: 0; z-index: -1; background: transparent; }
+    .main-wrapper { position: relative; z-index: 1; min-height: 100vh; padding: 24px; display: flex; align-items: flex-start; justify-content: center; }
     .card {
-      width: 100%;
-      max-width: 960px;
-      background: rgba(10, 16, 35, 0.78);
-      border-radius: 24px;
+      width: 100%; max-width: 960px; background: rgba(10, 16, 35, 0.78); border-radius: 24px;
       border: 1px solid rgba(174, 207, 255, 0.18);
-      box-shadow:
-        0 18px 50px rgba(0, 0, 0, 0.65),
-        0 0 0 1px rgba(255, 255, 255, 0.02);
-      backdrop-filter: blur(18px) saturate(180%);
-      padding: 20px 24px 20px;
-      display: grid;
-      grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
-      gap: 20px;
-      position: relative;
-      max-height: calc(100vh - 48px);
-      overflow-x: hidden;
-      overflow-y: auto;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.02);
+      backdrop-filter: blur(18px) saturate(180%); padding: 20px 24px 20px;
+      display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+      gap: 20px; position: relative; max-height: calc(100vh - 48px);
+      overflow-x: hidden; overflow-y: auto;
     }
-
-    .floating-animal {
-      position: absolute;
-      font-size: 32px;
-      opacity: 0.45;
-      animation: float 8s ease-in-out infinite alternate;
-      pointer-events: none;
-    }
-    .floating-animal.mouse {
-      top: 10px;
-      right: 12px;
-      animation-delay: -1s;
-    }
-    .floating-animal.bolt {
-      bottom: 12px;
-      left: 24px;
-      animation-delay: -2.5s;
-    }
-    .floating-animal.star {
-      bottom: 50%;
-      right: 40%;
-      font-size: 28px;
-      animation-delay: -4s;
-    }
-
-    @keyframes float {
-      0% { transform: translateY(0) translateX(0) rotate(0deg); }
-      100% { transform: translateY(-10px) translateX(5px) rotate(6deg); }
-    }
-
-    .card-left,
-    .card-right { min-width: 0; }
-
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 10px;
-    }
-
-    .logo-badge {
-      width: 42px;
-      height: 42px;
-      border-radius: 18px;
-      background: radial-gradient(circle at 30% 20%, #ffeaa7, #fdcb6e);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      box-shadow: 0 0 25px rgba(253, 203, 110, 0.7);
-      font-size: 24px;
-      flex-shrink: 0;
-    }
-
-    .title-wrap {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .title-wrap h1 {
-      font-size: 18px;
-      letter-spacing: 0.02em;
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
-
-    .title-wrap h1 span.accent {
-      font-size: 20px;
-      background: linear-gradient(120deg, #ffeaa7, #fdcb6e, #74b9ff);
-      -webkit-background-clip: text;
-      color: transparent;
-      font-weight: 600;
-    }
-
-    .title-sub {
-      font-size: 12px;
-      color: rgba(220, 230, 255, 0.8);
-    }
-
-    .header-right {
-      margin-left: auto;
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      gap: 4px;
-    }
-
-    .lang-toggle {
-      font-size: 11px;
-      padding: 4px 10px;
-      background: rgba(9, 14, 30, 0.9);
-    }
-
-    .author-line {
-      font-size: 11px;
-      color: rgba(200, 214, 255, 0.9);
-    }
-
-    .search-bar {
-      margin-top: 10px;
-      margin-bottom: 8px;
-      display: flex;
-      gap: 10px;
-    }
-
-    .search-input-wrap {
-      flex: 1;
-      position: relative;
-    }
-
-    .search-input-wrap::before {
-      content: "🔍";
-      position: absolute;
-      left: 10px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 16px;
-      opacity: 0.8;
-    }
-
-    #searchInput {
-      width: 100%;
-      padding: 9px 10px 9px 32px;
-      border-radius: 999px;
-      border: 1px solid rgba(174, 207, 255, 0.5);
-      background: rgba(7, 12, 30, 0.9);
-      color: #f9fbff;
-      outline: none;
-      font-size: 13px;
-      transition: border-color 0.2s, box-shadow 0.2s, background 0.2s;
-    }
-
-    #searchInput::placeholder {
-      color: rgba(200, 214, 255, 0.6);
-    }
-
-    #searchInput:focus {
-      border-color: #74b9ff;
-      box-shadow: 0 0 0 1px rgba(116, 185, 255, 0.4);
-      background: rgba(8, 13, 35, 0.98);
-    }
-
-    #searchBtn {
-      border-radius: 999px;
-      border: none;
-      padding: 9px 16px;
-      font-size: 13px;
-      cursor: pointer;
-      background: linear-gradient(135deg, #fdcb6e, #ffeaa7);
-      color: #1a1a1a;
-      font-weight: 500;
-      box-shadow:
-        0 0 15px rgba(253, 203, 110, 0.45),
-        0 0 0 1px rgba(255, 255, 255, 0.06);
-      transition: transform 0.12s ease-out, box-shadow 0.15s ease-out;
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    #searchBtn:hover {
-      transform: translateY(-1px);
-      box-shadow:
-        0 0 18px rgba(253, 203, 110, 0.7),
-        0 0 0 1px rgba(255, 255, 255, 0.12);
-    }
-
-    .source-summary-line {
-      font-size: 11px;
-      color: rgba(190, 205, 245, 0.95);
-      margin-bottom: 6px;
-      opacity: 0.9;
-    }
-
-    .source-filter {
-      display: flex;
-      align-items: center;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 4px;
-      margin-bottom: 4px;
-      font-size: 11px;
-      color: rgba(200, 214, 255, 0.95);
-    }
-
-    .source-filter-label {
-      opacity: 0.9;
-    }
-
-    .source-filter-option {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      padding: 2px 8px;
-      border-radius: 999px;
-      background: rgba(7, 12, 30, 0.9);
-      border: 1px solid rgba(174, 207, 255, 0.45);
-      cursor: pointer;
-    }
-
-    .source-filter-option input {
-      cursor: pointer;
-      accent-color: #fdcb6e;
-    }
-
-    .source-filter-option span {
-      white-space: nowrap;
-    }
-
+    .floating-animal { position: absolute; font-size: 32px; opacity: 0.45; animation: float 8s ease-in-out infinite alternate; pointer-events: none; }
+    .floating-animal.mouse { top: 10px; right: 12px; animation-delay: -1s; }
+    .floating-animal.bolt { bottom: 12px; left: 24px; animation-delay: -2.5s; }
+    .floating-animal.star { bottom: 50%; right: 40%; font-size: 28px; animation-delay: -4s; }
+    @keyframes float { 0% { transform: translateY(0) translateX(0) rotate(0deg); } 100% { transform: translateY(-10px) translateX(5px) rotate(6deg); } }
+    .card-left, .card-right { min-width: 0; }
+    .header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+    .logo-badge { width: 42px; height: 42px; border-radius: 18px; background: radial-gradient(circle at 30% 20%, #ffeaa7, #fdcb6e); display: flex; align-items: center; justify-content: center; box-shadow: 0 0 25px rgba(253, 203, 110, 0.7); font-size: 24px; flex-shrink: 0; }
+    .title-wrap { display: flex; flex-direction: column; gap: 2px; }
+    .title-wrap h1 { font-size: 18px; letter-spacing: 0.02em; display: flex; align-items: center; gap: 6px; }
+    .title-wrap h1 span.accent { font-size: 20px; background: linear-gradient(120deg, #ffeaa7, #fdcb6e, #74b9ff); -webkit-background-clip: text; color: transparent; font-weight: 600; }
+    .title-sub { font-size: 12px; color: rgba(220, 230, 255, 0.8); }
+    .header-right { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .lang-toggle { font-size: 11px; padding: 4px 10px; background: rgba(9, 14, 30, 0.9); }
+    .author-line { font-size: 11px; color: rgba(200, 214, 255, 0.9); }
+    .search-bar { margin-top: 10px; margin-bottom: 8px; display: flex; gap: 10px; }
+    .search-input-wrap { flex: 1; position: relative; }
+    .search-input-wrap::before { content: "🔍"; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 16px; opacity: 0.8; }
+    #searchInput { width: 100%; padding: 9px 10px 9px 32px; border-radius: 999px; border: 1px solid rgba(174, 207, 255, 0.5); background: rgba(7, 12, 30, 0.9); color: #f9fbff; outline: none; font-size: 13px; transition: border-color 0.2s, box-shadow 0.2s, background 0.2s; }
+    #searchInput::placeholder { color: rgba(200, 214, 255, 0.6); }
+    #searchInput:focus { border-color: #74b9ff; box-shadow: 0 0 0 1px rgba(116, 185, 255, 0.4); background: rgba(8, 13, 35, 0.98); }
+    #searchBtn { border-radius: 999px; border: none; padding: 9px 16px; font-size: 13px; cursor: pointer; background: linear-gradient(135deg, #fdcb6e, #ffeaa7); color: #1a1a1a; font-weight: 500; box-shadow: 0 0 15px rgba(253, 203, 110, 0.45), 0 0 0 1px rgba(255, 255, 255, 0.06); transition: transform 0.12s ease-out, box-shadow 0.15s ease-out; display: inline-flex; align-items: center; gap: 4px; }
+    #searchBtn:hover { transform: translateY(-1px); box-shadow: 0 0 18px rgba(253, 203, 110, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.12); }
+    .source-summary-line { font-size: 11px; color: rgba(190, 205, 245, 0.95); margin-bottom: 6px; opacity: 0.9; }
+    .source-filter { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; margin-bottom: 4px; font-size: 11px; color: rgba(200, 214, 255, 0.95); }
+    .source-filter-label { opacity: 0.9; }
+    .source-filter-option { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; background: rgba(7, 12, 30, 0.9); border: 1px solid rgba(174, 207, 255, 0.45); cursor: pointer; }
+    .source-filter-option input { cursor: pointer; accent-color: #fdcb6e; }
+    .source-filter-option span { white-space: nowrap; }
     .results {
       background: radial-gradient(circle at top left, rgba(46, 134, 222, 0.15), transparent 50%);
-      border-radius: 16px;
-      padding: 10px;
-      border: 1px solid rgba(116, 185, 255, 0.18);
-      max-height: 330px;
-      overflow-y: auto;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(116, 185, 255, 0.6) transparent;
+      border-radius: 16px; padding: 10px; border: 1px solid rgba(116, 185, 255, 0.18);
+      max-height: 330px; overflow-y: auto; scrollbar-width: thin; scrollbar-color: rgba(116, 185, 255, 0.6) transparent;
     }
-
     .results::-webkit-scrollbar { width: 6px; }
-    .results::-webkit-scrollbar-thumb {
-      background: rgba(116, 185, 255, 0.55);
-      border-radius: 999px;
-    }
-
-    .result-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 6px 8px;
-      border-radius: 10px;
-      font-size: 13px;
-      color: rgba(232, 237, 255, 0.96);
-      cursor: pointer;
-      transition: background 0.15s, transform 0.1s;
-    }
-
+    .results::-webkit-scrollbar-thumb { background: rgba(116, 185, 255, 0.55); border-radius: 999px; }
+    .result-item { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px; border-radius: 10px; font-size: 13px; color: rgba(232, 237, 255, 0.96); cursor: pointer; transition: background 0.15s, transform 0.1s; }
     .result-item + .result-item { margin-top: 2px; }
-
-    .result-item:hover {
-      background: rgba(9, 17, 43, 0.95);
-      transform: translateY(-1px);
-    }
-
-    .result-item.active {
-      background: linear-gradient(120deg, rgba(253, 203, 110, 0.9), rgba(116, 185, 255, 0.7));
-      color: #1b1b1b;
-    }
-
-    .result-main {
-      display: flex;
-      align-items: baseline;
-      gap: 6px;
-      overflow: hidden;
-      flex: 1;
-    }
-    .result-index {
-      font-size: 11px;
-      color: rgba(200, 214, 255, 0.9);
-      min-width: 22px;
-      text-align: right;
-    }
-    .result-title {
-      font-weight: 500;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden;
-      max-width: 180px;
-    }
-    .result-singer {
-      font-size: 12px;
-      color: rgba(180, 196, 255, 0.9);
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden;
-      max-width: 110px;
-    }
-
-    .source-chip {
-      font-size: 10px;
-      padding: 2px 6px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      background: rgba(12, 20, 50, 0.9);
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      margin-left: 4px;
-      flex-shrink: 0;
-    }
-    .source-chip-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 999px;
-      display: inline-block;
-      box-shadow: 0 0 4px rgba(255, 255, 255, 0.7);
-    }
-    .source-chip-migu .source-chip-dot {
-      background: linear-gradient(135deg, #fdcb6e, #ffeaa7);
-    }
-    .source-chip-netease .source-chip-dot {
-      background: linear-gradient(135deg, #ff7675, #d63031);
-    }
-    .source-chip-qobuz .source-chip-dot {
-      background: linear-gradient(135deg, #00a1e4, #005f8f);
-    }
-
-    .result-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-left: 8px;
-      flex-shrink: 0;
-    }
-
-    .pill-btn {
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.24);
-      background: rgba(12, 20, 50, 0.8);
-      padding: 3px 10px;
-      font-size: 11px;
-      cursor: pointer;
-      color: rgba(240, 245, 255, 0.95);
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      transition: background 0.15s, border-color 0.15s, transform 0.1s;
-    }
-
-    .pill-btn:hover {
-      background: rgba(255, 255, 255, 0.1);
-      border-color: rgba(255, 255, 255, 0.4);
-      transform: translateY(-0.5px);
-    }
-
-    .now-playing-card {
-      background: radial-gradient(circle at bottom right, rgba(255, 234, 167, 0.18), rgba(52, 73, 94, 0.7));
-      border-radius: 18px;
-      padding: 10px 12px 12px;
-      border: 1px solid rgba(255, 234, 167, 0.35);
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      height: 100%;
-      overflow: hidden;
-    }
-
-    .now-playing-top {
-      display: flex;
-      gap: 10px;
-    }
-
-    .cover-wrap {
-      width: 84px;
-      height: 84px;
-      border-radius: 18px;
-      overflow: hidden;
-      background: rgba(8, 13, 28, 0.8);
-      border: 1px solid rgba(174, 207, 255, 0.5);
-      position: relative;
-      flex-shrink: 0;
-    }
-
-    #coverImg {
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      display: block;
-    }
-
-    .cover-overlay {
-      position: absolute;
-      inset: 0;
-      background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.28), transparent 55%);
-      mix-blend-mode: screen;
-      pointer-events: none;
-    }
-
-    .song-meta {
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      gap: 2px;
-      min-width: 0;
-    }
-
-    .song-title {
-      font-size: 15px;
-      font-weight: 600;
-      white-space: nowrap;
-      text-overflow: ellipsis;
-      overflow: hidden;
-    }
-
-    .song-singer {
-      font-size: 12px;
-      color: rgba(229, 233, 255, 0.9);
-    }
-
-    .song-extra {
-      font-size: 11px;
-      color: rgba(204, 216, 255, 0.9);
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .song-extra .tag {
-      padding: 2px 7px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.3);
-      background: rgba(11, 19, 45, 0.85);
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-    }
-
-    .tag.source-tag {
-      border-color: rgba(116, 185, 255, 0.6);
-      background: rgba(14, 25, 60, 0.9);
-    }
-
-    .source-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      display: inline-block;
-      margin-right: 2px;
-      box-shadow: 0 0 6px rgba(255, 255, 255, 0.65);
-    }
-    .source-migu {
-      background: linear-gradient(135deg, #fdcb6e, #ffeaa7);
-    }
-    .source-netease {
-      background: linear-gradient(135deg, #ff7675, #d63031);
-    }
-    .source-mixed {
-      background: linear-gradient(135deg, #fdcb6e, #ff7675);
-    }
-    .source-qobuz {
-      background: linear-gradient(135deg, #00a1e4, #005f8f);
-    }
-
-    .player-controls {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    #audioEl {
-      display: none;
-    }
-
-    .progress-container {
-      margin-top: 4px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .progress-bar {
-      position: relative;
-      width: 100%;
-      height: 8px;
-      border-radius: 999px;
-      background: radial-gradient(circle at top,
-                  rgba(12, 20, 50, 0.95),
-                  rgba(4, 8, 20, 0.95));
-      border: 1px solid rgba(174, 207, 255, 0.35);
-      overflow: hidden;
-      cursor: pointer;
-    }
-
-    .progress-fill {
-      position: absolute;
-      inset: 0;
-      transform-origin: left center;
-      transform: scaleX(0);
-      background: linear-gradient(120deg,
-                  rgba(253, 203, 110, 0.95),
-                  rgba(116, 185, 255, 0.95));
-      box-shadow:
-        0 0 12px rgba(253, 203, 110, 0.8),
-        0 0 22px rgba(116, 185, 255, 0.75);
-    }
-
-    .progress-glow {
-      position: absolute;
-      inset: 0;
-      background: linear-gradient(to bottom,
-                  rgba(255, 255, 255, 0.25),
-                  transparent 55%);
-      mix-blend-mode: screen;
-      pointer-events: none;
-    }
-
-    .time-labels {
-      display: flex;
-      justify-content: space-between;
-      font-size: 11px;
-      color: rgba(190, 205, 245, 0.9);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .player-buttons {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    .left-buttons,
-    .right-buttons {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-
-    .link-btn {
-      font-size: 11px;
-      border-radius: 999px;
-      padding: 4px 9px;
-      border: none;
-      cursor: pointer;
-      background: rgba(9, 14, 30, 0.95);
-      color: rgba(235, 241, 255, 0.95);
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      text-decoration: none;
-      transition: background 0.15s, transform 0.1s;
-    }
-
-    .link-btn:hover {
-      background: rgba(255, 255, 255, 0.12);
-      transform: translateY(-0.5px);
-    }
-
-    .link-btn.primary {
-      background: linear-gradient(120deg, #fdcb6e, #ffeaa7);
-      color: #1b1b1b;
-    }
-
-    .link-btn.primary:hover {
-      background: linear-gradient(120deg, #ffeaa7, #ffeaa7);
-    }
-
-    #vizCanvas {
-      width: 100%;
-      height: 70px;
-      border-radius: 10px;
-      margin-top: 4px;
-      background: rgba(5, 9, 22, 0.95);
-      border: 1px solid rgba(174, 207, 255, 0.22);
-    }
-
-    .playlist-wrap {
-      margin-top: 6px;
-      background: rgba(5, 9, 22, 0.8);
-      border-radius: 12px;
-      border: 1px solid rgba(174, 207, 255, 0.18);
-      padding: 6px 8px;
-      max-height: 100px;
-      overflow-y: auto;
-      flex: 0 0 auto;
-    }
-
-    .playlist-header {
-      font-size: 11px;
-      color: rgba(200, 214, 255, 0.95);
-      margin-bottom: 4px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .playlist-header span.right {
-      font-size: 10px;
-      color: rgba(180, 195, 238, 0.95);
-    }
-
+    .result-item:hover { background: rgba(9, 17, 43, 0.95); transform: translateY(-1px); }
+    .result-item.active { background: linear-gradient(120deg, rgba(253, 203, 110, 0.9), rgba(116, 185, 255, 0.7)); color: #1b1b1b; }
+    .result-main { display: flex; align-items: baseline; gap: 6px; overflow: hidden; flex: 1; }
+    .result-index { font-size: 11px; color: rgba(200, 214, 255, 0.9); min-width: 22px; text-align: right; }
+    .result-title { font-weight: 500; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; max-width: 180px; }
+    .result-singer { font-size: 12px; color: rgba(180, 196, 255, 0.9); white-space: nowrap; text-overflow: ellipsis; overflow: hidden; max-width: 110px; }
+    .source-chip { font-size: 10px; padding: 2px 6px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.2); background: rgba(12, 20, 50, 0.9); display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; flex-shrink: 0; }
+    .source-chip-dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; box-shadow: 0 0 4px rgba(255, 255, 255, 0.7); }
+    .source-chip-migu .source-chip-dot { background: linear-gradient(135deg, #fdcb6e, #ffeaa7); }
+    .source-chip-netease .source-chip-dot { background: linear-gradient(135deg, #ff7675, #d63031); }
+    .source-chip-qobuz .source-chip-dot { background: linear-gradient(135deg, #00a1e4, #005f8f); }
+    .result-actions { display: flex; align-items: center; gap: 8px; margin-left: 8px; flex-shrink: 0; }
+    .pill-btn { border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.24); background: rgba(12, 20, 50, 0.8); padding: 3px 10px; font-size: 11px; cursor: pointer; color: rgba(240, 245, 255, 0.95); display: inline-flex; align-items: center; gap: 4px; transition: background 0.15s, border-color 0.15s, transform 0.1s; }
+    .pill-btn:hover { background: rgba(255, 255, 255, 0.1); border-color: rgba(255, 255, 255, 0.4); transform: translateY(-0.5px); }
+    .now-playing-card { background: radial-gradient(circle at bottom right, rgba(255, 234, 167, 0.18), rgba(52, 73, 94, 0.7)); border-radius: 18px; padding: 10px 12px 12px; border: 1px solid rgba(255, 234, 167, 0.35); display: flex; flex-direction: column; gap: 8px; height: 100%; overflow: hidden; }
+    .now-playing-top { display: flex; gap: 10px; }
+    .cover-wrap { width: 84px; height: 84px; border-radius: 18px; overflow: hidden; background: rgba(8, 13, 28, 0.8); border: 1px solid rgba(174, 207, 255, 0.5); position: relative; flex-shrink: 0; }
+    #coverImg { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .cover-overlay { position: absolute; inset: 0; background: radial-gradient(circle at top left, rgba(255, 255, 255, 0.28), transparent 55%); mix-blend-mode: screen; pointer-events: none; }
+    .song-meta { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
+    .song-title { font-size: 15px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; }
+    .song-singer { font-size: 12px; color: rgba(229, 233, 255, 0.9); }
+    .song-extra { font-size: 11px; color: rgba(204, 216, 255, 0.9); display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .song-extra .tag { padding: 2px 7px; border-radius: 999px; border: 1px solid rgba(255, 255, 255, 0.3); background: rgba(11, 19, 45, 0.85); display: inline-flex; align-items: center; gap: 4px; }
+    .tag.source-tag { border-color: rgba(116, 185, 255, 0.6); background: rgba(14, 25, 60, 0.9); }
+    .source-dot { width: 8px; height: 8px; border-radius: 999px; display: inline-block; margin-right: 2px; box-shadow: 0 0 6px rgba(255, 255, 255, 0.65); }
+    .source-migu { background: linear-gradient(135deg, #fdcb6e, #ffeaa7); }
+    .source-netease { background: linear-gradient(135deg, #ff7675, #d63031); }
+    .source-mixed { background: linear-gradient(135deg, #fdcb6e, #ff7675); }
+    .source-qobuz { background: linear-gradient(135deg, #00a1e4, #005f8f); }
+    .player-controls { display: flex; flex-direction: column; gap: 6px; }
+    #audioEl { display: none; }
+    .progress-container { margin-top: 4px; display: flex; flex-direction: column; gap: 4px; }
+    .progress-bar { position: relative; width: 100%; height: 8px; border-radius: 999px; background: radial-gradient(circle at top, rgba(12, 20, 50, 0.95), rgba(4, 8, 20, 0.95)); border: 1px solid rgba(174, 207, 255, 0.35); overflow: hidden; cursor: pointer; }
+    .progress-fill { position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0); background: linear-gradient(120deg, rgba(253, 203, 110, 0.95), rgba(116, 185, 255, 0.95)); box-shadow: 0 0 12px rgba(253, 203, 110, 0.8), 0 0 22px rgba(116, 185, 255, 0.75); }
+    .progress-glow { position: absolute; inset: 0; background: linear-gradient(to bottom, rgba(255, 255, 255, 0.25), transparent 55%); mix-blend-mode: screen; pointer-events: none; }
+    .time-labels { display: flex; justify-content: space-between; font-size: 11px; color: rgba(190, 205, 245, 0.9); font-variant-numeric: tabular-nums; }
+    .player-buttons { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+    .left-buttons, .right-buttons { display: flex; gap: 6px; flex-wrap: wrap; }
+    .link-btn { font-size: 11px; border-radius: 999px; padding: 4px 9px; border: none; cursor: pointer; background: rgba(9, 14, 30, 0.95); color: rgba(235, 241, 255, 0.95); display: inline-flex; align-items: center; gap: 4px; text-decoration: none; transition: background 0.15s, transform 0.1s; }
+    .link-btn:hover { background: rgba(255, 255, 255, 0.12); transform: translateY(-0.5px); }
+    .link-btn.primary { background: linear-gradient(120deg, #fdcb6e, #ffeaa7); color: #1b1b1b; }
+    .link-btn.primary:hover { background: linear-gradient(120deg, #ffeaa7, #ffeaa7); }
+    #vizCanvas { width: 100%; height: 70px; border-radius: 10px; margin-top: 4px; background: rgba(5, 9, 22, 0.95); border: 1px solid rgba(174, 207, 255, 0.22); }
+    .playlist-wrap { margin-top: 6px; background: rgba(5, 9, 22, 0.8); border-radius: 12px; border: 1px solid rgba(174, 207, 255, 0.18); padding: 6px 8px; max-height: 100px; overflow-y: auto; flex: 0 0 auto; }
+    .playlist-header { font-size: 11px; color: rgba(200, 214, 255, 0.95); margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between; }
+    .playlist-header span.right { font-size: 10px; color: rgba(180, 195, 238, 0.95); }
     .playlist-list { max-height: 80px; }
-
-    .playlist-item {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 2px 3px;
-      border-radius: 8px;
-      font-size: 11px;
-      color: rgba(225, 235, 255, 0.95);
-      cursor: pointer;
-      transition: background 0.15s, transform 0.1s;
-    }
-
+    .playlist-item { display: flex; align-items: center; justify-content: space-between; padding: 2px 3px; border-radius: 8px; font-size: 11px; color: rgba(225, 235, 255, 0.95); cursor: pointer; transition: background 0.15s, transform 0.1s; }
     .playlist-item + .playlist-item { margin-top: 2px; }
-
-    .playlist-item:hover {
-      background: rgba(255, 255, 255, 0.06);
-      transform: translateY(-0.5px);
-    }
-
-    .playlist-item.active {
-      background: linear-gradient(120deg, rgba(253, 203, 110, 0.9), rgba(116, 185, 255, 0.7));
-      color: #1b1b1b;
-    }
-
-    .playlist-index {
-      min-width: 18px;
-      text-align: right;
-      margin-right: 4px;
-    }
-
-    .playlist-main {
-      flex: 1;
-      overflow: hidden;
-    }
-
-    .playlist-title {
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-    }
-
-    .playlist-singer {
-      font-size: 10px;
-      opacity: 0.9;
-    }
-
-    .playlist-badge {
-      font-size: 10px;
-      margin-left: 4px;
-      opacity: 0.85;
-    }
-
-    .lyrics-wrap {
-      flex: 1;
-      background: rgba(7, 11, 28, 0.9);
-      border-radius: 14px;
-      padding: 6px 8px;
-      border: 1px solid rgba(174, 207, 255, 0.18);
-      overflow-y: auto;
-      max-height: 72px;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(116, 185, 255, 0.7) transparent;
-      font-size: 12px;
-      margin-top: 6px;
-    }
-
+    .playlist-item:hover { background: rgba(255, 255, 255, 0.06); transform: translateY(-0.5px); }
+    .playlist-item.active { background: linear-gradient(120deg, rgba(253, 203, 110, 0.9), rgba(116, 185, 255, 0.7)); color: #1b1b1b; }
+    .playlist-index { min-width: 18px; text-align: right; margin-right: 4px; }
+    .playlist-main { flex: 1; overflow: hidden; }
+    .playlist-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .playlist-singer { font-size: 10px; opacity: 0.9; }
+    .playlist-badge { font-size: 10px; margin-left: 4px; opacity: 0.85; }
+    .lyrics-wrap { flex: 1; background: rgba(7, 11, 28, 0.9); border-radius: 14px; padding: 6px 8px; border: 1px solid rgba(174, 207, 255, 0.18); overflow-y: auto; max-height: 72px; scrollbar-width: thin; scrollbar-color: rgba(116, 185, 255, 0.7) transparent; font-size: 12px; margin-top: 6px; }
     .lyrics-wrap::-webkit-scrollbar { width: 6px; }
-    .lyrics-wrap::-webkit-scrollbar-thumb {
-      background: rgba(116, 185, 255, 0.7);
-      border-radius: 999px;
-    }
-
-    .lyrics-placeholder {
-      color: rgba(160, 177, 225, 0.9);
-      text-align: center;
-      padding: 10px 6px;
-      white-space: pre-line;
-    }
-
-    .lyric-line {
-      padding: 2px 0;
-      line-height: 1.5;
-      color: rgba(230, 237, 255, 0.9);
-      transition: color 0.15s, transform 0.12s;
-    }
-
-    .lyric-line.active {
-      color: #ffeaa7;
-      font-weight: 600;
-      transform: scale(1.02);
-      text-shadow: 0 0 12px rgba(255, 234, 167, 0.9);
-    }
-
-    .lyrics-link-wrap {
-      margin-top: 4px;
-      font-size: 11px;
-      color: rgba(200, 214, 255, 0.9);
-    }
-
-    .status-text {
-      margin-top: 4px;
-      font-size: 11px;
-      color: rgba(175, 191, 238, 0.95);
-    }
-
+    .lyrics-wrap::-webkit-scrollbar-thumb { background: rgba(116, 185, 255, 0.7); border-radius: 999px; }
+    .lyrics-placeholder { color: rgba(160, 177, 225, 0.9); text-align: center; padding: 10px 6px; white-space: pre-line; }
+    .lyric-line { padding: 2px 0; line-height: 1.5; color: rgba(230, 237, 255, 0.9); transition: color 0.15s, transform 0.12s; }
+    .lyric-line.active { color: #ffeaa7; font-weight: 600; transform: scale(1.02); text-shadow: 0 0 12px rgba(255, 234, 167, 0.9); }
+    .lyrics-link-wrap { margin-top: 4px; font-size: 11px; color: rgba(200, 214, 255, 0.9); }
+    .status-text { margin-top: 4px; font-size: 11px; color: rgba(175, 191, 238, 0.95); }
     .status-text span { color: #ffeaa7; }
-
-    .shortcuts-hint {
-      margin-top: 2px;
-      font-size: 10px;
-      color: rgba(190, 205, 245, 0.9);
-      line-height: 1.4;
-    }
-
+    .shortcuts-hint { margin-top: 2px; font-size: 10px; color: rgba(190, 205, 245, 0.9); line-height: 1.4; }
     @media (max-width: 768px) {
-      .card {
-        grid-template-columns: 1fr;
-        padding: 16px;
-        max-height: none;
-        height: auto;
-        overflow-y: visible;
-      }
+      .card { grid-template-columns: 1fr; padding: 16px; max-height: none; height: auto; overflow-y: visible; }
       .results { max-height: 200px; }
       .now-playing-card { max-height: none; }
       #vizCanvas { height: 60px; }
@@ -785,36 +150,20 @@
         <header class="header">
           <div class="logo-badge">⚡</div>
           <div class="title-wrap">
-            <h1>
-              <span class="accent" id="appTitle">皮卡丘的音乐站</span>
-            </h1>
-            <div class="title-sub" id="appSubtitle">
-              搜索 · 播放 · 跟着小皮卡一起摇头
-            </div>
+            <h1><span class="accent" id="appTitle">皮卡丘的音乐站</span></h1>
+            <div class="title-sub" id="appSubtitle">搜索 · 播放 · 跟着小皮卡一起摇头</div>
           </div>
           <div class="header-right">
-            <button id="langToggleBtn" type="button" class="pill-btn lang-toggle">
-              中 / EN
-            </button>
-            <div id="authorLine" class="author-line">
-              作者：Zhenchao Jin + GPT5
-            </div>
+            <button id="langToggleBtn" type="button" class="pill-btn lang-toggle">中 / EN</button>
+            <div id="authorLine" class="author-line">作者：Zhenchao Jin + GPT5</div>
           </div>
         </header>
 
         <form id="searchForm" class="search-bar">
           <div class="search-input-wrap">
-            <input
-              id="searchInput"
-              type="text"
-              autocomplete="off"
-              placeholder="输入歌名 / 歌手，比如：周杰伦"
-            />
+            <input id="searchInput" type="text" autocomplete="off" placeholder="输入歌名 / 歌手，比如：周杰伦" />
           </div>
-          <button id="searchBtn" type="submit">
-            搜索一下
-            <span>⚡</span>
-          </button>
+          <button id="searchBtn" type="submit">搜索一下<span>⚡</span></button>
         </form>
 
         <!-- 搜索来源筛选 -->
@@ -830,14 +179,13 @@
             <span id="sourceFilterNeteaseText">网易云音乐</span>
           </label>
           <label class="source-filter-option">
-            <input type="checkbox" id="sourceQobuzCheckbox" checked />
+            <!-- 默认不勾选 Qobuz -->
+            <input type="checkbox" id="sourceQobuzCheckbox" />
             <span id="sourceFilterQobuzText">Qobuz</span>
           </label>
         </div>
 
-        <div id="sourceSummary" class="source-summary-line">
-          当前来源：咪咕音乐 + 网易云音乐 + Qobuz
-        </div>
+        <div id="sourceSummary" class="source-summary-line">当前来源：咪咕音乐 + 网易云音乐</div>
 
         <div id="results" class="results"></div>
       </div>
@@ -847,21 +195,14 @@
         <div class="now-playing-card">
           <div class="now-playing-top">
             <div class="cover-wrap">
-              <img
-                id="coverImg"
-                src="https://picsum.photos/seed/pikachu-music/300/300"
-                alt="专辑封面"
-              />
+              <img id="coverImg" src="https://picsum.photos/seed/pikachu-music/300/300" alt="专辑封面" />
               <div class="cover-overlay"></div>
             </div>
             <div class="song-meta">
               <div id="songTitle" class="song-title"></div>
               <div id="songSinger" class="song-singer"></div>
               <div class="song-extra">
-                <span class="tag status-tag">
-                  <span>⚡</span>
-                  <span id="songStatusShort">闲置中</span>
-                </span>
+                <span class="tag status-tag"><span>⚡</span><span id="songStatusShort">闲置中</span></span>
                 <span class="tag source-tag" id="songSourceTag">
                   <span class="source-dot source-migu"></span>
                   <span id="songSourceText">MiGu</span>
@@ -886,20 +227,12 @@
 
             <div class="player-buttons">
               <div class="left-buttons">
-                <button id="toggleLyricsBtn" type="button" class="link-btn">
-                  🎼 显示/隐藏歌词
-                </button>
-                <button id="playModeBtn" type="button" class="link-btn">
-                  🔁 顺序
-                </button>
+                <button id="toggleLyricsBtn" type="button" class="link-btn">🎼 显示/隐藏歌词</button>
+                <button id="playModeBtn" type="button" class="link-btn">🔁 顺序</button>
               </div>
               <div class="right-buttons">
-                <a id="downloadMusicBtn" href="#" class="link-btn primary" download>
-                  ⬇️ 下载音乐
-                </a>
-                <a id="openOriginBtn" href="#" class="link-btn" target="_blank" rel="noopener">
-                  🌐 打开原链接
-                </a>
+                <a id="downloadMusicBtn" href="#" class="link-btn primary" download>⬇️ 下载音乐</a>
+                <a id="openOriginBtn" href="#" class="link-btn" target="_blank" rel="noopener">🌐 打开原链接</a>
               </div>
             </div>
           </div>
@@ -917,9 +250,7 @@
           <div id="lyricsWrap" class="lyrics-wrap"></div>
           <div id="lyricsLinkWrap" class="lyrics-link-wrap"></div>
 
-          <div class="status-text">
-            <span id="globalStatusText">等待搜索...</span>
-          </div>
+          <div class="status-text"><span id="globalStatusText">等待搜索...</span></div>
           <div id="shortcutsHint" class="shortcuts-hint"></div>
         </div>
       </div>
@@ -927,7 +258,7 @@
   </div>
 
   <script>
-  // 背景粒子
+  // 背景粒子（原样保留）
   (function () {
     const canvas = document.getElementById("bgCanvas");
     const ctx = canvas.getContext("2d");
@@ -960,42 +291,31 @@
       }
       buildShapes();
     }
-
     function createParticles() {
       particles = [];
       for (let i = 0; i < PARTICLE_COUNT; i++) {
         particles.push({
-          x: Math.random() * canvas.width,
-          y: Math.random() * canvas.height,
-          vx: 0,
-          vy: 0,
-          size: 1.4 + Math.random() * 2.0,
+          x: Math.random() * canvas.width, y: Math.random() * canvas.height,
+          vx: 0, vy: 0, size: 1.4 + Math.random() * 2.0,
           color: COLORS[Math.floor(Math.random() * COLORS.length)],
-          targetX: Math.random() * canvas.width,
-          targetY: Math.random() * canvas.height
+          targetX: Math.random() * canvas.width, targetY: Math.random() * canvas.height
         });
       }
     }
-
     function generateShapePoints(char) {
       const off = document.createElement("canvas");
-      const w = 180;
-      const h = 180;
-      off.width = w;
-      off.height = h;
+      const w = 180; const h = 180;
+      off.width = w; off.height = h;
       const octx = off.getContext("2d");
       octx.clearRect(0, 0, w, h);
       octx.fillStyle = "#fff";
-      octx.textAlign = "center";
-      octx.textBaseline = "middle";
+      octx.textAlign = "center"; octx.textBaseline = "middle";
       octx.font = "160px system-ui, Apple Color Emoji, Segoe UI Emoji";
       octx.fillText(char, w / 2, h / 2);
 
       const imgData = octx.getImageData(0, 0, w, h).data;
-      const pts = [];
-      const gap = 4;
+      const pts = []; const gap = 4;
       const scale = (Math.min(canvas.width, canvas.height) / w) * 0.6;
-
       for (let y = 0; y < h; y += gap) {
         for (let x = 0; x < w; x += gap) {
           const idx = (y * w + x) * 4 + 3;
@@ -1009,20 +329,17 @@
       }
       return pts;
     }
-
     function buildShapes() {
       shapeCache["smile"] = generateShapePoints("😊");
       shapeCache["mouse"] = generateShapePoints("🐭");
       shapeCache["star"] = generateShapePoints("⭐");
     }
-
     function scatterTargets() {
       particles.forEach((p) => {
         p.targetX = Math.random() * canvas.width;
         p.targetY = Math.random() * canvas.height;
       });
     }
-
     function applyShapeTargets(name) {
       const pts = shapeCache[name];
       if (!pts || !pts.length) return;
@@ -1032,102 +349,71 @@
         p.targetY = pt.y + (Math.random() - 0.5) * 10;
       });
     }
-
     function animate(ts) {
       requestAnimationFrame(animate);
       const dt = ts - lastTimestamp;
       lastTimestamp = ts;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-
       if (Math.random() < 0.003 && shapeMode === "shape") {
         particles.forEach((p) => {
           p.targetX += (Math.random() - 0.5) * 6;
           p.targetY += (Math.random() - 0.5) * 6;
         });
       }
-
       for (let i = 0; i < particles.length; i++) {
         const p = particles[i];
-        const spring = 0.035;
-        const friction = 0.9;
-        const dx = p.targetX - p.x;
-        const dy = p.targetY - p.y;
-        p.vx += dx * spring;
-        p.vy += dy * spring;
-        p.vx *= friction;
-        p.vy *= friction;
-        p.x += p.vx * (dt / 16.7);
-        p.y += p.vy * (dt / 16.7);
+        const spring = 0.035; const friction = 0.9;
+        const dx = p.targetX - p.x; const dy = p.targetY - p.y;
+        p.vx += dx * spring; p.vy += dy * spring;
+        p.vx *= friction; p.vy *= friction;
+        p.x += p.vx * (dt / 16.7); p.y += p.vy * (dt / 16.7);
+        if (p.x < -50 || p.x > canvas.width + 50) { p.x = Math.random() * canvas.width; p.targetX = p.x; }
+        if (p.y < -50 || p.y > canvas.height + 50) { p.y = Math.random() * canvas.height; p.targetY = p.y; }
 
-        if (p.x < -50 || p.x > canvas.width + 50) {
-          p.x = Math.random() * canvas.width;
-          p.targetX = p.x;
-        }
-        if (p.y < -50 || p.y > canvas.height + 50) {
-          p.y = Math.random() * canvas.height;
-          p.targetY = p.y;
-        }
-
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-        ctx.fillStyle = p.color;
-        ctx.fill();
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fillStyle = p.color; ctx.fill();
 
         for (let j = i + 1; j < i + 18 && j < particles.length; j++) {
           const p2 = particles[j];
-          const dx2 = p2.x - p.x;
-          const dy2 = p2.y - p.y;
+          const dx2 = p2.x - p.x; const dy2 = p2.y - p.y;
           const dist2 = dx2 * dx2 + dy2 * dy2;
           if (dist2 < 120 * 120) {
             const alpha = 1 - dist2 / (120 * 120);
-            ctx.beginPath();
-            ctx.moveTo(p.x, p.y);
-            ctx.lineTo(p2.x, p2.y);
+            ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p2.x, p2.y);
             ctx.strokeStyle = "rgba(255, 234, 167," + (alpha * 0.25) + ")";
-            ctx.lineWidth = 0.6;
-            ctx.stroke();
+            ctx.lineWidth = 0.6; ctx.stroke();
           }
         }
       }
     }
-
     function startShapeCycle() {
       setInterval(() => {
         if (shapeMode === "scatter") {
           const name = shapeNames[shapeIndex % shapeNames.length];
-          shapeIndex++;
-          shapeMode = "shape";
-          applyShapeTargets(name);
-        } else {
-          shapeMode = "scatter";
-          scatterTargets();
-        }
+          shapeIndex++; shapeMode = "shape"; applyShapeTargets(name);
+        } else { shapeMode = "scatter"; scatterTargets(); }
       }, 11500);
     }
-
     window.addEventListener("resize", resizeCanvas);
-    resizeCanvas();
-    createParticles();
-    buildShapes();
-    scatterTargets();
-    startShapeCycle();
+    resizeCanvas(); createParticles(); buildShapes(); scatterTargets(); startShapeCycle();
     requestAnimationFrame(animate);
   })();
 
-  // ============================ 音乐逻辑 ============================
+  // ============================ 音乐逻辑（仅 MiGu / NetEase / Qobuz） ============================
   (function () {
-    // 旧 API
+    // MiGu / NetEase API（保留）
     const API_MIGU = "https://api.cenguigui.cn/api/mg_music/";
     const API_NETEASE_SEARCH = "https://api.cenguigui.cn/api/music/netease/WyY_Dg.php";
     const API_NETEASE_DETAIL = "https://api.cenguigui.cn/api/netease/music_v1.php";
 
-    // GDStudio 相关（保留 Qobuz 等）
+    // 仅保留 Qobuz（GDStudio）
     const GDS_SITE_TO_API = {
       qobuz: "https://music-api-us.gdstudio.xyz/api.php",
     };
 
-    const NETEASE_LIMIT = 10;           // 网易云 10 条
-    const PER_SOURCE_LIMIT = 10;        // 每个源 10 条
+    // 三源统一检索数量限制 = 10
+    const NETEASE_LIMIT = 10;
+    const PER_SOURCE_LIMIT = 10;
 
     const searchForm = document.getElementById("searchForm");
     const searchInput = document.getElementById("searchInput");
@@ -1196,16 +482,13 @@
         searchStatus: (q) => `正在搜索 “${q}” ...`,
         searchResult: (n) => `搜索到 ${n} 个结果，选一首来听吧～`,
         searchNoResult: "没有搜索到结果，换个关键词试试？",
-        resultsInitialHint:
-          "⚡ 小提示：先在上面搜索\n比如输入 周杰伦，再点一首歌播放～",
-        lyricsInitialPlaceholder:
-          "🎤 歌词将会在这里出现，并随着播放自动高亮～",
+        resultsInitialHint: "⚡ 小提示：先在上面搜索\n比如输入 周杰伦，再点一首歌播放～",
+        lyricsInitialPlaceholder: "🎤 歌词将会在这里出现，并随着播放自动高亮～",
         lyricsLoading: "正在加载歌词...",
         lyricsParseFail: "歌词解析失败，可能是空文件。",
         lyricsNone: "这首歌暂时没有获取到歌词～",
         lyricsLoadFail: "歌词加载失败，请稍后重试或直接打开歌词文件。",
-        noResultPlaceholder:
-          "暂时没有结果，可以尝试换个歌名 / 歌手再搜一次～",
+        noResultPlaceholder: "暂时没有结果，可以尝试换个歌名 / 歌手再搜一次～",
         statusInit: "等待搜索，你可以试试输入“周杰伦”。",
         statusPlaying: (title) => `开始播放：${title}`,
         statusSearchError: "搜索时出现错误，请稍后重试。",
@@ -1223,8 +506,7 @@
         playlistTitle: "播放列表",
         playlistEmpty: "空空如也",
         playlistCount: (n) => `${n} 首`,
-        shortcutsHint:
-          "键盘快捷键：\nSpace：播放/暂停  ←/→：快退/快进5秒\n↑/↓：音量±5%  P：上一首  N：下一首  M：切换播放模式",
+        shortcutsHint: "键盘快捷键：\nSpace：播放/暂停  ←/→：快退/快进5秒\n↑/↓：音量±5%  P：上一首  N：下一首  M：切换播放模式",
         nowPlayingIdleTitle: "等待你的点歌 🎵",
         nowPlayingIdleSinger: "小皮卡说：先来一首试试？",
         sourceLabelMigu: "咪咕音乐",
@@ -1250,17 +532,13 @@
         searchStatus: (q) => `Searching for “${q}” ...`,
         searchResult: (n) => `Found ${n} results. Pick one to play!`,
         searchNoResult: "No results, try another keyword?",
-        resultsInitialHint:
-          "⚡ Tip: search above\nFor example, type Jay Chou and click a song to play.",
-        lyricsInitialPlaceholder:
-          "🎤 Lyrics here and auto-highlight with playback.",
+        resultsInitialHint: "⚡ Tip: search above\nFor example, type Jay Chou and click a song to play.",
+        lyricsInitialPlaceholder: "🎤 Lyrics here and auto-highlight with playback.",
         lyricsLoading: "Loading lyrics...",
         lyricsParseFail: "Failed to parse lyrics (file may be empty).",
         lyricsNone: "No lyrics found for this song.",
-        lyricsLoadFail:
-          "Failed to load lyrics. Please try again later or open the raw file.",
-        noResultPlaceholder:
-          "No results for now. Try a different song / artist.",
+        lyricsLoadFail: "Failed to load lyrics. Please try again later or open the raw file.",
+        noResultPlaceholder: "No results for now. Try a different song / artist.",
         statusInit: 'Waiting for search. Try typing "Jay Chou".',
         statusPlaying: (title) => `Now playing: ${title}`,
         statusSearchError: "Error during search, please try again later.",
@@ -1273,14 +551,12 @@
         statePlaying: "Playing",
         statePaused: "Paused",
         stateEnded: "Ended",
-        openLyricsPrefix:
-          "If lyrics cannot be displayed, open the raw lyrics file:",
+        openLyricsPrefix: "If lyrics cannot be displayed, open the raw lyrics file:",
         openLyricsText: "Open raw lyrics",
         playlistTitle: "Playlist",
         playlistEmpty: "Empty",
         playlistCount: (n) => `${n} tracks`,
-        shortcutsHint:
-          "Keyboard shortcuts:\nSpace: play/pause  ←/→: -/+5s\n↑/↓: volume ±5%  P: prev  N: next  M: switch play mode",
+        shortcutsHint: "Keyboard shortcuts:\nSpace: play/pause  ←/→: -/+5s\n↑/↓: volume ±5%  P: prev  N: next  M: switch play mode",
         nowPlayingIdleTitle: "Waiting for your song 🎵",
         nowPlayingIdleSinger: "Pikachu says: pick something to play!",
         sourceLabelMigu: "MiGu Music",
@@ -1319,7 +595,6 @@
       vizCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
       startFakeVisualizer();
     }
-
     window.addEventListener("resize", () => {
       if (!vizCanvas || !vizCtx) return;
       const rect = vizCanvas.getBoundingClientRect();
@@ -1328,53 +603,33 @@
       vizCanvas.height = rect.height * dpr;
       vizCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
     });
-
     function startFakeVisualizer() {
       if (!vizCanvas || !vizCtx) return;
       if (vizAnimationId) cancelAnimationFrame(vizAnimationId);
-
       let phase = 0;
       function draw() {
         vizAnimationId = requestAnimationFrame(draw);
         const rect = vizCanvas.getBoundingClientRect();
         const dpr = window.devicePixelRatio || 1;
-        if (
-          vizCanvas.width !== rect.width * dpr ||
-          vizCanvas.height !== rect.height * dpr
-        ) {
+        if (vizCanvas.width !== rect.width * dpr || vizCanvas.height !== rect.height * dpr) {
           vizCanvas.width = rect.width * dpr;
           vizCanvas.height = rect.height * dpr;
           vizCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
         }
-
-        const width = rect.width;
-        const height = rect.height;
+        const width = rect.width; const height = rect.height;
         vizCtx.clearRect(0, 0, width, height);
-
-        const barCount = 40;
-        const barWidth = width / barCount;
-        const playing =
-          !audioEl.paused && !audioEl.ended && audioEl.currentTime > 0;
-        phase += playing ? 0.12 : 0.02;
-        const base = playing ? 0.2 : 0.05;
-
+        const barCount = 40; const barWidth = width / barCount;
+        const playing = !audioEl.paused && !audioEl.ended && audioEl.currentTime > 0;
+        phase += playing ? 0.12 : 0.02; const base = playing ? 0.2 : 0.05;
         for (let i = 0; i < barCount; i++) {
           const wave = (Math.sin(phase + i * 0.4) + 1) / 2;
           const noise = Math.random() * 0.4;
           const v = base + (playing ? wave * 0.5 + noise * 0.2 : wave * 0.1);
-          const barHeight = v * height;
-          const x = i * barWidth;
-          const y = height - barHeight;
+          const barHeight = v * height; const x = i * barWidth; const y = height - barHeight;
           const alpha = 0.3 + 0.7 * v;
-
           vizCtx.fillStyle = "rgba(255,234,167," + alpha + ")";
-          if (vizCtx.roundRect) {
-            vizCtx.beginPath();
-            vizCtx.roundRect(x + 1, y, barWidth - 2, barHeight, 4);
-            vizCtx.fill();
-          } else {
-            vizCtx.fillRect(x + 1, y, barWidth - 2, barHeight);
-          }
+          if (vizCtx.roundRect) { vizCtx.beginPath(); vizCtx.roundRect(x + 1, y, barWidth - 2, barHeight, 4); vizCtx.fill(); }
+          else { vizCtx.fillRect(x + 1, y, barWidth - 2, barHeight); }
         }
       }
       draw();
@@ -1389,27 +644,22 @@
       const ss = s < 10 ? "0" + s : String(s);
       return mm + ":" + ss;
     }
-
     function updateProgressBar() {
       if (!progressBarEl || !progressFillEl || !currentTimeLabelEl || !durationLabelEl) return;
-
       if (!isFinite(audioEl.duration) || audioEl.duration <= 0) {
         progressFillEl.style.transform = "scaleX(0)";
         currentTimeLabelEl.textContent = "00:00";
         durationLabelEl.textContent = "00:00";
         return;
       }
-
       const ratio = audioEl.currentTime / audioEl.duration;
       const clamped = Math.min(Math.max(ratio, 0), 1);
       progressFillEl.style.transform = "scaleX(" + clamped + ")";
       currentTimeLabelEl.textContent = formatTime(audioEl.currentTime);
       durationLabelEl.textContent = formatTime(audioEl.duration);
     }
-
     audioEl.addEventListener("timeupdate", updateProgressBar);
     audioEl.addEventListener("loadedmetadata", updateProgressBar);
-
     if (progressBarEl) {
       progressBarEl.addEventListener("click", (e) => {
         if (!isFinite(audioEl.duration) || audioEl.duration <= 0) return;
@@ -1427,7 +677,6 @@
       globalStatusText.textContent = text;
       if (kind) globalStatusText.dataset.kind = kind;
     }
-
     function renderInitialResultsHint() {
       resultsEl.innerHTML = "";
       const hint = langStaticTexts[currentLang].resultsInitialHint;
@@ -1436,7 +685,6 @@
       div.innerHTML = hint.replace(/\n/g, "<br/>");
       resultsEl.appendChild(div);
     }
-
     function showLyricsPlaceholder(text) {
       lyricsWrap.innerHTML = "";
       const div = document.createElement("div");
@@ -1445,7 +693,6 @@
       lyricsWrap.appendChild(div);
       if (lyricsLinkWrap) lyricsLinkWrap.innerHTML = "";
     }
-
     function showRawLyricsLink(url) {
       if (!lyricsLinkWrap) return;
       const t = langStaticTexts[currentLang];
@@ -1453,52 +700,34 @@
       const info = document.createElement("span");
       info.textContent = t.openLyricsPrefix;
       const link = document.createElement("a");
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.style.marginLeft = "4px";
-      link.style.color = "#74b9ff";
-      link.style.textDecoration = "underline";
+      link.href = url; link.target = "_blank"; link.rel = "noopener";
+      link.style.marginLeft = "4px"; link.style.color = "#74b9ff"; link.style.textDecoration = "underline";
       link.textContent = t.openLyricsText;
       lyricsLinkWrap.appendChild(info);
       lyricsLinkWrap.appendChild(link);
     }
-
     function updateSourceSummary() {
       const t = langStaticTexts[currentLang];
       if (!sourceSummaryEl) return;
-
       const names = [];
-      if (sourceMiguCheckbox && sourceMiguCheckbox.checked)     names.push(t.sourceLabelMigu);
+      if (sourceMiguCheckbox && sourceMiguCheckbox.checked) names.push(t.sourceLabelMigu);
       if (sourceNeteaseCheckbox && sourceNeteaseCheckbox.checked) names.push(t.sourceLabelNetease);
-      if (sourceQobuzCheckbox && sourceQobuzCheckbox.checked)   names.push(t.sourceLabelQobuz);
-
+      if (sourceQobuzCheckbox && sourceQobuzCheckbox.checked) names.push(t.sourceLabelQobuz);
       let text;
-      if (!names.length) {
-        text = currentLang === "zh" ? "当前来源：暂无" : "Sources: none";
-      } else if (names.length === 1) {
-        text = currentLang === "zh" ? `当前来源：${names[0]}` : `Sources: ${names[0]}`;
-      } else {
-        const joined = names.join(" + ");
-        text = currentLang === "zh" ? `当前来源：${joined}` : `Sources: ${joined}`;
-      }
+      if (!names.length) { text = currentLang === "zh" ? "当前来源：暂无" : "Sources: none"; }
+      else if (names.length === 1) { text = currentLang === "zh" ? `当前来源：${names[0]}` : `Sources: ${names[0]}`; }
+      else { const joined = names.join(" + "); text = currentLang === "zh" ? `当前来源：${joined}` : `Sources: ${joined}`; }
       sourceSummaryEl.textContent = text;
     }
-
     function updatePlayModeLabel() {
       const t = langStaticTexts[currentLang];
       if (!playModeBtn) return;
       let text = "";
-      if (playMode === PLAY_MODE_SEQUENCE) {
-        text = "➡ " + (t.playModeSequenceShort || t.playModeSequence);
-      } else if (playMode === PLAY_MODE_LOOP_ALL) {
-        text = "🔁 " + (t.playModeLoopAllShort || t.playModeLoopAll);
-      } else {
-        text = "🔂 " + (t.playModeSingleShort || t.playModeSingle);
-      }
+      if (playMode === PLAY_MODE_SEQUENCE) { text = "➡ " + (t.playModeSequenceShort || t.playModeSequence); }
+      else if (playMode === PLAY_MODE_LOOP_ALL) { text = "🔁 " + (t.playModeLoopAllShort || t.playModeLoopAll); }
+      else { text = "🔂 " + (t.playModeSingleShort || t.playModeSingle); }
       playModeBtn.textContent = text;
     }
-
     function applyLanguage() {
       const t = langStaticTexts[currentLang];
       appTitleEl.textContent = t.appTitle;
@@ -1520,59 +749,36 @@
         songTitleEl.textContent = t.nowPlayingIdleTitle;
         songSingerEl.textContent = t.nowPlayingIdleSinger;
       }
-
       if (audioEl.src) {
-        if (!audioEl.paused && !audioEl.ended) {
-          songStatusShort.textContent = t.statePlaying;
-        } else if (audioEl.ended) {
-          songStatusShort.textContent = t.stateEnded;
-        } else {
-          songStatusShort.textContent = t.statePaused;
-        }
-      } else {
-        songStatusShort.textContent = t.stateIdle;
-      }
+        if (!audioEl.paused && !audioEl.ended) { songStatusShort.textContent = t.statePlaying; }
+        else if (audioEl.ended) { songStatusShort.textContent = t.stateEnded; }
+        else { songStatusShort.textContent = t.statePaused; }
+      } else { songStatusShort.textContent = t.stateIdle; }
 
       playlistTitleEl.textContent = t.playlistTitle;
-      playlistCountEl.textContent = playlist.length
-        ? t.playlistCount(playlist.length)
-        : t.playlistEmpty;
+      playlistCountEl.textContent = playlist.length ? t.playlistCount(playlist.length) : t.playlistEmpty;
 
       shortcutsHintEl.innerHTML = t.shortcutsHint.replace(/\n/g, "<br/>");
+      updateSourceSummary(); updatePlayModeLabel();
 
-      updateSourceSummary();
-      updatePlayModeLabel();
-
-      if (!lrcEntries.length) {
-        showLyricsPlaceholder(t.lyricsInitialPlaceholder);
-      }
-      if (!resultsEl.hasChildNodes()) {
-        renderInitialResultsHint();
-      }
-      if (globalStatusText.dataset.kind === "init") {
-        setStatus(t.statusInit, "init");
-      }
+      if (!lrcEntries.length) { showLyricsPlaceholder(t.lyricsInitialPlaceholder); }
+      if (!resultsEl.hasChildNodes()) { renderInitialResultsHint(); }
+      if (globalStatusText.dataset.kind === "init") { setStatus(t.statusInit, "init"); }
 
       if (currentSourceType) {
         let labelText;
-        if (currentSourceType === "netease") {
-          labelText = t.sourceLabelNetease;
-        } else if (currentSourceType === "qobuz") {
-          labelText = t.sourceLabelQobuz;
-        } else {
-          labelText = t.sourceLabelMigu;
-        }
+        if (currentSourceType === "netease") labelText = t.sourceLabelNetease;
+        else if (currentSourceType === "qobuz") labelText = t.sourceLabelQobuz;
+        else labelText = t.sourceLabelMigu;
         songSourceTextEl.textContent = labelText;
       }
     }
-
     function ensureAtLeastOneSource(changed) {
       const allCbs = [
-        { key: "migu",    el: sourceMiguCheckbox },
+        { key: "migu", el: sourceMiguCheckbox },
         { key: "netease", el: sourceNeteaseCheckbox },
-        { key: "qobuz",   el: sourceQobuzCheckbox }
+        { key: "qobuz", el: sourceQobuzCheckbox },
       ].filter(it => it.el);
-
       const hasAny = allCbs.some(it => it.el.checked);
       if (!hasAny) {
         const target = allCbs.find(it => it.key === changed) || allCbs[0];
@@ -1580,40 +786,21 @@
       }
       updateSourceSummary();
     }
-
     langToggleBtn.addEventListener("click", () => {
       currentLang = currentLang === "zh" ? "en" : "zh";
       applyLanguage();
     });
-
     if (playModeBtn) {
       playModeBtn.addEventListener("click", () => {
-        if (playMode === PLAY_MODE_SEQUENCE) {
-          playMode = PLAY_MODE_LOOP_ALL;
-        } else if (playMode === PLAY_MODE_LOOP_ALL) {
-          playMode = PLAY_MODE_SINGLE;
-        } else {
-          playMode = PLAY_MODE_SEQUENCE;
-        }
+        if (playMode === PLAY_MODE_SEQUENCE) playMode = PLAY_MODE_LOOP_ALL;
+        else if (playMode === PLAY_MODE_LOOP_ALL) playMode = PLAY_MODE_SINGLE;
+        else playMode = PLAY_MODE_SEQUENCE;
         updatePlayModeLabel();
       });
     }
-
-    if (sourceMiguCheckbox) {
-      sourceMiguCheckbox.addEventListener("change", () =>
-        ensureAtLeastOneSource("migu")
-      );
-    }
-    if (sourceNeteaseCheckbox) {
-      sourceNeteaseCheckbox.addEventListener("change", () =>
-        ensureAtLeastOneSource("netease")
-      );
-    }
-    if (sourceQobuzCheckbox) {
-      sourceQobuzCheckbox.addEventListener("change", () =>
-        ensureAtLeastOneSource("qobuz")
-      );
-    }
+    if (sourceMiguCheckbox) sourceMiguCheckbox.addEventListener("change", () => ensureAtLeastOneSource("migu"));
+    if (sourceNeteaseCheckbox) sourceNeteaseCheckbox.addEventListener("change", () => ensureAtLeastOneSource("netease"));
+    if (sourceQobuzCheckbox) sourceQobuzCheckbox.addEventListener("change", () => ensureAtLeastOneSource("qobuz"));
 
     searchForm.addEventListener("submit", function (e) {
       e.preventDefault();
@@ -1627,326 +814,148 @@
       searchSongs(q);
     });
 
-    // ================== JSONP + MD5 工具（GDStudio 用） ==================
-
-    // 简单 md5 实现（标准实现，返回 32 位十六进制小写）
-  function md5cycle(x, k) {
-    let [a, b, c, d] = x;
-
-    function ff(a, b, c, d, x, s, t) {
-      a = a + ((b & c) | (~b & d)) + x + t;
-      return ((a << s) | (a >>> (32 - s))) + b;
+    // ================== JSONP + MD5 工具（GDStudio / Qobuz 用） ==================
+    // 仅保留 Qobuz 签名与 JSONP 逻辑
+    function md5cycle(x, k) {
+      let [a, b, c, d] = x;
+      function ff(a, b, c, d, x, s, t) { a = a + ((b & c) | (~b & d)) + x + t; return ((a << s) | (a >>> (32 - s))) + b; }
+      function gg(a, b, c, d, x, s, t) { a = a + ((b & d) | (c & ~d)) + x + t; return ((a << s) | (a >>> (32 - s))) + b; }
+      function hh(a, b, c, d, x, s, t) { a = a + (b ^ c ^ d) + x + t; return ((a << s) | (a >>> (32 - s))) + b; }
+      function ii(a, b, c, d, x, s, t) { a = a + (c ^ (b | ~d)) + x + t; return ((a << s) | (a >>> (32 - s))) + b; }
+      a = ff(a, b, c, d, k[0], 7, -680876936); d = ff(d, a, b, c, k[1], 12, -389564586);
+      c = ff(c, d, a, b, k[2], 17, 606105819); b = ff(b, c, d, a, k[3], 22, -1044525330);
+      a = ff(a, b, c, d, k[4], 7, -176418897); d = ff(d, a, b, c, k[5], 12, 1200080426);
+      c = ff(c, d, a, b, k[6], 17, -1473231341); b = ff(b, c, d, a, k[7], 22, -45705983);
+      a = ff(a, b, c, d, k[8], 7, 1770035416); d = ff(d, a, b, c, k[9], 12, -1958414417);
+      c = ff(c, d, a, b, k[10], 17, -42063); b = ff(b, c, d, a, k[11], 22, -1990404162);
+      a = ff(a, b, c, d, k[12], 7, 1804603682); d = ff(d, a, b, c, k[13], 12, -40341101);
+      c = ff(c, d, a, b, k[14], 17, -1502002290); b = ff(b, c, d, a, k[15], 22, 1236535329);
+      a = gg(a, b, c, d, k[1], 5, -165796510); d = gg(d, a, b, c, k[6], 9, -1069501632);
+      c = gg(c, d, a, b, k[11], 14, 643717713); b = gg(b, c, d, a, k[0], 20, -373897302);
+      a = gg(a, b, c, d, k[5], 5, -701558691); d = gg(d, a, b, c, k[10], 9, 38016083);
+      c = gg(c, d, a, b, k[15], 14, -660478335); b = gg(b, c, d, a, k[4], 20, -405537848);
+      a = gg(a, b, c, d, k[9], 5, 568446438); d = gg(d, a, b, c, k[14], 9, -1019803690);
+      c = gg(c, d, a, b, k[3], 14, -187363961); b = gg(b, c, d, a, k[8], 20, 1163531501);
+      a = gg(a, b, c, d, k[13], 5, -1444681467); d = gg(d, a, b, c, k[2], 9, -51403784);
+      c = gg(c, d, a, b, k[7], 14, 1735328473); b = gg(b, c, d, a, k[12], 20, -1926607734);
+      a = hh(a, b, c, d, k[5], 4, -378558); d = hh(d, a, b, c, k[8], 11, -2022574463);
+      c = hh(c, d, a, b, k[11], 16, 1839030562); b = hh(b, c, d, a, k[14], 23, -35309556);
+      a = hh(a, b, c, d, k[1], 4, -1530992060); d = hh(d, a, b, c, k[4], 11, 1272893353);
+      c = hh(c, d, a, b, k[7], 16, -155497632); b = hh(b, c, d, a, k[10], 23, -1094730640);
+      a = hh(a, b, c, d, k[13], 4, 681279174); d = hh(d, a, b, c, k[0], 11, -358537222);
+      c = hh(c, d, a, b, k[3], 16, -722521979); b = hh(b, c, d, a, k[6], 23, 76029189);
+      a = hh(a, b, c, d, k[9], 4, -640364487); d = hh(d, a, b, c, k[12], 11, -421815835);
+      c = hh(c, d, a, b, k[15], 16, 530742520); b = hh(b, c, d, a, k[2], 23, -995338651);
+      a = ii(a, b, c, d, k[0], 6, -198630844); d = ii(d, a, b, c, k[7], 10, 1126891415);
+      c = ii(c, d, a, b, k[14], 15, -1416354905); b = ii(b, c, d, a, k[5], 21, -57434055);
+      a = ii(a, b, c, d, k[12], 6, 1700485571); d = ii(d, a, b, c, k[3], 10, -1894986606);
+      c = ii(c, d, a, b, k[10], 15, -1051523); b = ii(b, c, d, a, k[1], 21, -2054922799);
+      a = ii(a, b, c, d, k[8], 6, 1873313359); d = ii(d, a, b, c, k[15], 10, -30611744);
+      c = ii(c, d, a, b, k[6], 15, -1560198380); b = ii(b, c, d, a, k[13], 21, 1309151649);
+      a = ii(a, b, c, d, k[4], 6, -145523070); d = ii(d, a, b, c, k[11], 10, -1120210379);
+      c = ii(c, d, a, b, k[2], 15, 718787259); b = ii(b, c, d, a, k[9], 21, -343485551);
+      x[0] = (x[0] + a) | 0; x[1] = (x[1] + b) | 0; x[2] = (x[2] + c) | 0; x[3] = (x[3] + d) | 0;
     }
-    function gg(a, b, c, d, x, s, t) {
-      a = a + ((b & d) | (c & ~d)) + x + t;
-      return ((a << s) | (a >>> (32 - s))) + b;
+    function md5blk(s) {
+      const blks = [];
+      for (let i = 0; i < 64; i += 4) {
+        blks[i >> 2] =
+          s.charCodeAt(i) |
+          (s.charCodeAt(i + 1) << 8) |
+          (s.charCodeAt(i + 2) << 16) |
+          (s.charCodeAt(i + 3) << 24);
+      }
+      return blks;
     }
-    function hh(a, b, c, d, x, s, t) {
-      a = a + (b ^ c ^ d) + x + t;
-      return ((a << s) | (a >>> (32 - s))) + b;
+    function md51(s) {
+      let n = s.length;
+      const state = [1732584193, -271733879, -1732584194, 271733878];
+      let i;
+      for (i = 64; i <= n; i += 64) { md5cycle(state, md5blk(s.substring(i - 64, i))); }
+      s = s.substring(i - 64);
+      const tail = new Array(16).fill(0);
+      for (i = 0; i < s.length; i++) { tail[i >> 2] |= s.charCodeAt(i) << ((i % 4) << 3); }
+      tail[i >> 2] |= 0x80 << ((i % 4) << 3);
+      if (i > 55) { md5cycle(state, tail); for (let j = 0; j < 16; j++) tail[j] = 0; }
+      tail[14] = n * 8; md5cycle(state, tail); return state;
     }
-    function ii(a, b, c, d, x, s, t) {
-      a = a + (c ^ (b | ~d)) + x + t;
-      return ((a << s) | (a >>> (32 - s))) + b;
+    function rhex(n) {
+      const hex = "0123456789abcdef"; let s = "";
+      for (let j = 0; j < 4; j++) {
+        s += hex.charAt((n >> (j * 8 + 4)) & 0x0f) + hex.charAt((n >> (j * 8)) & 0x0f);
+      }
+      return s;
     }
-
-    // 64 轮
-    a = ff(a, b, c, d, k[0], 7, -680876936);
-    d = ff(d, a, b, c, k[1], 12, -389564586);
-    c = ff(c, d, a, b, k[2], 17, 606105819);
-    b = ff(b, c, d, a, k[3], 22, -1044525330);
-    a = ff(a, b, c, d, k[4], 7, -176418897);
-    d = ff(d, a, b, c, k[5], 12, 1200080426);
-    c = ff(c, d, a, b, k[6], 17, -1473231341);
-    b = ff(b, c, d, a, k[7], 22, -45705983);
-    a = ff(a, b, c, d, k[8], 7, 1770035416);
-    d = ff(d, a, b, c, k[9], 12, -1958414417);
-    c = ff(c, d, a, b, k[10], 17, -42063);
-    b = ff(b, c, d, a, k[11], 22, -1990404162);
-    a = ff(a, b, c, d, k[12], 7, 1804603682);
-    d = ff(d, a, b, c, k[13], 12, -40341101);
-    c = ff(c, d, a, b, k[14], 17, -1502002290);
-    b = ff(b, c, d, a, k[15], 22, 1236535329);
-
-    a = gg(a, b, c, d, k[1], 5, -165796510);
-    d = gg(d, a, b, c, k[6], 9, -1069501632);
-    c = gg(c, d, a, b, k[11], 14, 643717713);
-    b = gg(b, c, d, a, k[0], 20, -373897302);
-    a = gg(a, b, c, d, k[5], 5, -701558691);
-    d = gg(d, a, b, c, k[10], 9, 38016083);
-    c = gg(c, d, a, b, k[15], 14, -660478335);
-    b = gg(b, c, d, a, k[4], 20, -405537848);
-    a = gg(a, b, c, d, k[9], 5, 568446438);
-    d = gg(d, a, b, c, k[14], 9, -1019803690);
-    c = gg(c, d, a, b, k[3], 14, -187363961);
-    b = gg(b, c, d, a, k[8], 20, 1163531501);
-    a = gg(a, b, c, d, k[13], 5, -1444681467);
-    d = gg(d, a, b, c, k[2], 9, -51403784);
-    c = gg(c, d, a, b, k[7], 14, 1735328473);
-    b = gg(b, c, d, a, k[12], 20, -1926607734);
-
-    a = hh(a, b, c, d, k[5], 4, -378558);
-    d = hh(d, a, b, c, k[8], 11, -2022574463);
-    c = hh(c, d, a, b, k[11], 16, 1839030562);
-    b = hh(b, c, d, a, k[14], 23, -35309556);
-    a = hh(a, b, c, d, k[1], 4, -1530992060);
-    d = hh(d, a, b, c, k[4], 11, 1272893353);
-    c = hh(c, d, a, b, k[7], 16, -155497632);
-    b = hh(b, c, d, a, k[10], 23, -1094730640);
-    a = hh(a, b, c, d, k[13], 4, 681279174);
-    d = hh(d, a, b, c, k[0], 11, -358537222);
-    c = hh(c, d, a, b, k[3], 16, -722521979);
-    b = hh(b, c, d, a, k[6], 23, 76029189);
-    a = hh(a, b, c, d, k[9], 4, -640364487);
-    d = hh(d, a, b, c, k[12], 11, -421815835);
-    c = hh(c, d, a, b, k[15], 16, 530742520);
-    b = hh(b, c, d, a, k[2], 23, -995338651);
-
-    a = ii(a, b, c, d, k[0], 6, -198630844);
-    d = ii(d, a, b, c, k[7], 10, 1126891415);
-    c = ii(c, d, a, b, k[14], 15, -1416354905);
-    b = ii(b, c, d, a, k[5], 21, -57434055);
-    a = ii(a, b, c, d, k[12], 6, 1700485571);
-    d = ii(d, a, b, c, k[3], 10, -1894986606);
-    c = ii(c, d, a, b, k[10], 15, -1051523);
-    b = ii(b, c, d, a, k[1], 21, -2054922799);
-    a = ii(a, b, c, d, k[8], 6, 1873313359);
-    d = ii(d, a, b, c, k[15], 10, -30611744);
-    c = ii(c, d, a, b, k[6], 15, -1560198380);
-    b = ii(b, c, d, a, k[13], 21, 1309151649);
-    a = ii(a, b, c, d, k[4], 6, -145523070);
-    d = ii(d, a, b, c, k[11], 10, -1120210379);
-    c = ii(c, d, a, b, k[2], 15, 718787259);
-    b = ii(b, c, d, a, k[9], 21, -343485551);
-
-    x[0] = (x[0] + a) | 0;
-    x[1] = (x[1] + b) | 0;
-    x[2] = (x[2] + c) | 0;
-    x[3] = (x[3] + d) | 0;
-  }
-
-  function md5blk(s) {
-    const blks = [];
-    for (let i = 0; i < 64; i += 4) {
-      blks[i >> 2] =
-        s.charCodeAt(i) |
-        (s.charCodeAt(i + 1) << 8) |
-        (s.charCodeAt(i + 2) << 16) |
-        (s.charCodeAt(i + 3) << 24);
+    function md5(s) { const arr = md51(s); return rhex(arr[0]) + rhex(arr[1]) + rhex(arr[2]) + rhex(arr[3]); }
+    const GDS_SIGN_HOST = "music.gdstudio.xyz";
+    const GDS_SIGN_VERSION = "2025.11.4";
+    function gdsYieldCallback() {
+      let randomNum = "";
+      for (let i = 0; i < 21; i++) randomNum += Math.floor(Math.random() * 10);
+      const timestamp = Date.now();
+      return `jQuery${randomNum}_${timestamp}`;
     }
-    return blks;
-  }
-
-  function md51(s) {
-    let n = s.length;
-    const state = [1732584193, -271733879, -1732584194, 271733878];
-    let i;
-    for (i = 64; i <= n; i += 64) {
-      md5cycle(state, md5blk(s.substring(i - 64, i)));
+    function gdsYieldCRC(idValue, hostname = GDS_SIGN_HOST, version = GDS_SIGN_VERSION) {
+      const tsMs = Date.now();
+      const ts9 = String(tsMs).slice(0, 9);
+      const parts = version.split(".");
+      const padded = parts.map((p) => (p.length === 1 ? "0" + p : p));
+      const verPadded = padded.join("");
+      const idStr = encodeURIComponent(String(idValue));
+      const src = `${hostname}|${verPadded}|${ts9}|${idStr}`;
+      const md5Hex = md5(src);
+      return md5Hex.slice(-8).toUpperCase();
     }
-    s = s.substring(i - 64);
-    const tail = new Array(16).fill(0);
-    for (i = 0; i < s.length; i++) {
-      tail[i >> 2] |= s.charCodeAt(i) << ((i % 4) << 3);
+    function parseJSONP(text) {
+      const start = text.indexOf("(");
+      const end = text.lastIndexOf(")");
+      if (start === -1 || end === -1 || end <= start + 1) return null;
+      const jsonStr = text.slice(start + 1, end);
+      try { return JSON.parse(jsonStr); } catch (e) { console.error("JSONP parse error", e); return null; }
     }
-    tail[i >> 2] |= 0x80 << ((i % 4) << 3);
-    if (i > 55) {
-      md5cycle(state, tail);
-      for (let j = 0; j < 16; j++) tail[j] = 0;
+    async function gdsSearchOnce(source, keyword, limit) {
+      const baseUrl = GDS_SITE_TO_API[source];
+      if (!baseUrl) return [];
+      const callbackName = gdsYieldCallback();
+      const sVal = gdsYieldCRC(keyword);
+
+      const paramsBase = { types: "search", source: source, count: String(limit), pages: "1", name: keyword, s: sVal };
+      const urlParams = new URLSearchParams({ ...paramsBase, callback: callbackName, _: String(Date.now()) });
+      const url = baseUrl + "?" + urlParams.toString();
+      const resp = await fetch(url);
+      const text = await resp.text();
+      const data = parseJSONP(text);
+      if (!Array.isArray(data)) return [];
+      // 只接受 Qobuz
+      return data.filter(it => it && it.source === "qobuz");
     }
-    tail[14] = n * 8;
-    md5cycle(state, tail);
-    return state;
-  }
-
-  function rhex(n) {
-    const hex = "0123456789abcdef";
-    let s = "";
-    for (let j = 0; j < 4; j++) {
-      s +=
-        hex.charAt((n >> (j * 8 + 4)) & 0x0f) +
-        hex.charAt((n >> (j * 8)) & 0x0f);
+    async function gdsFetchUrl(source, idValue) {
+      const baseUrl = GDS_SITE_TO_API[source];
+      if (!baseUrl) return null;
+      const callbackName = gdsYieldCallback();
+      const sVal = gdsYieldCRC(idValue);
+      const dataJson = { types: "url", id: idValue, source: source, br: 999, s: sVal };
+      const urlParams = new URLSearchParams({ ...dataJson, callback: callbackName, _: String(Date.now()) });
+      const url = baseUrl + "?" + urlParams.toString();
+      const resp = await fetch(url);
+      const text = await resp.text();
+      const result = parseJSONP(text);
+      return result || null;
     }
-    return s;
-  }
-
-  function md5(s) {
-    const arr = md51(s);
-    return rhex(arr[0]) + rhex(arr[1]) + rhex(arr[2]) + rhex(arr[3]);
-  }
-
-  const GDS_SIGN_HOST = "music.gdstudio.xyz";
-  const GDS_SIGN_VERSION = "2025.11.4";
-
-  // 对应 Python 的 _yieldcallback()
-  function gdsYieldCallback() {
-    let randomNum = "";
-    for (let i = 0; i < 21; i++) {
-      randomNum += Math.floor(Math.random() * 10);
+    async function gdsFetchLyric(source, lyricId) {
+      const baseUrl = GDS_SITE_TO_API[source];
+      if (!baseUrl || !lyricId) return null;
+      const callbackName = gdsYieldCallback();
+      const sVal = gdsYieldCRC(lyricId);
+      const dataJson = { types: "lyric", id: lyricId, source: source, s: sVal };
+      const urlParams = new URLSearchParams({ ...dataJson, callback: callbackName, _: String(Date.now()) });
+      const url = baseUrl + "?" + urlParams.toString();
+      const resp = await fetch(url);
+      const text = await resp.text();
+      const result = parseJSONP(text);
+      return result || null;
     }
-    const timestamp = Date.now();
-    return `jQuery${randomNum}_${timestamp}`;
-  }
-
-  // 对应 Python 的 _yieldcrc32()
-  // src = f"{hostname}|{ver_padded}|{ts9}|{id_str}"
-  // return md5(src)[-8:].upper()
-  function gdsYieldCRC(idValue, hostname = GDS_SIGN_HOST, version = GDS_SIGN_VERSION) {
-    const tsMs = Date.now();
-    const ts9 = String(tsMs).slice(0, 9);
-    const parts = version.split(".");
-    const padded = parts.map((p) => (p.length === 1 ? "0" + p : p));
-    const verPadded = padded.join("");
-    const idStr = encodeURIComponent(String(idValue));
-    const src = `${hostname}|${verPadded}|${ts9}|${idStr}`;
-    const md5Hex = md5(src);
-    return md5Hex.slice(-8).toUpperCase();
-  }
-
-  function parseJSONP(text) {
-    const start = text.indexOf("(");
-    const end = text.lastIndexOf(")");
-    if (start === -1 || end === -1 || end <= start + 1) return null;
-    const jsonStr = text.slice(start + 1, end);
-    try {
-      return JSON.parse(jsonStr);
-    } catch (e) {
-      console.error("JSONP parse error", e);
-      return null;
-    }
-  }
-
-  // search 调用：每次带 s + callback，返回 JSONP
-  async function gdsSearchOnce(source, keyword, limit) {
-    const baseUrl = GDS_SITE_TO_API[source];
-    if (!baseUrl) return [];
-    const callbackName = gdsYieldCallback();
-    const sVal = gdsYieldCRC(keyword);
-
-    const paramsBase = {
-      types: "search",
-      source: source,
-      count: String(limit),
-      pages: "1",
-      name: keyword,
-      s: sVal
-    };
-
-    let url;
-    let fetchOptions;
-    if (baseUrl === "https://music.gdstudio.xyz/api.php") {
-      url = baseUrl + "?callback=" + encodeURIComponent(callbackName);
-      const bodyParams = new URLSearchParams(paramsBase);
-      fetchOptions = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-        },
-        body: bodyParams.toString()
-      };
-    } else {
-      const urlParams = new URLSearchParams({
-        ...paramsBase,
-        callback: callbackName,
-        _: String(Date.now())
-      });
-      url = baseUrl + "?" + urlParams.toString();
-      fetchOptions = { method: "GET" };
-    }
-
-    const resp = await fetch(url);
-    const text = await resp.text();
-    const data = parseJSONP(text);
-    if (!Array.isArray(data)) return [];
-    return data;
-  }
-
-  // url 调用：同样带 s + callback
-  async function gdsFetchUrl(source, idValue) {
-    const baseUrl = GDS_SITE_TO_API[source];
-    if (!baseUrl) return null;
-    const callbackName = gdsYieldCallback();
-    const sVal = gdsYieldCRC(idValue);
-
-    const dataJson = {
-      types: "url",
-      id: idValue,
-      source: source,
-      br: 999,
-      s: sVal
-    };
-
-    let url;
-    let fetchOptions;
-    if (baseUrl === "https://music.gdstudio.xyz/api.php") {
-      url = baseUrl + "?callback=" + encodeURIComponent(callbackName);
-      const bodyParams = new URLSearchParams(dataJson);
-      fetchOptions = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-        },
-        body: bodyParams.toString()
-      };
-    } else {
-      const urlParams = new URLSearchParams({
-        ...dataJson,
-        callback: callbackName,
-        _: String(Date.now())
-      });
-      url = baseUrl + "?" + urlParams.toString();
-      fetchOptions = { method: "GET" };
-    }
-
-    const resp = await fetch(url);
-    const text = await resp.text();
-    const result = parseJSONP(text);
-    return result || null;
-  }
-
-  // lyric 调用：同样带 s + callback
-  async function gdsFetchLyric(source, lyricId) {
-    const baseUrl = GDS_SITE_TO_API[source];
-    if (!baseUrl || !lyricId) return null;
-    const callbackName = gdsYieldCallback();
-    const sVal = gdsYieldCRC(lyricId);
-
-    const dataJson = {
-      types: "lyric",
-      id: lyricId,
-      source: source,
-      s: sVal
-    };
-
-    let url;
-    let fetchOptions;
-    if (baseUrl === "https://music.gdstudio.xyz/api.php") {
-      url = baseUrl + "?callback=" + encodeURIComponent(callbackName);
-      const bodyParams = new URLSearchParams(dataJson);
-      fetchOptions = {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-        },
-        body: bodyParams.toString()
-      };
-    } else {
-      const urlParams = new URLSearchParams({
-        ...dataJson,
-        callback: callbackName,
-        _: String(Date.now())
-      });
-      url = baseUrl + "?" + urlParams.toString();
-      fetchOptions = { method: "GET" };
-    }
-
-    const resp = await fetch(url);
-    const text = await resp.text();
-    const result = parseJSONP(text);
-    return result || null;
-  }
-
-    // 返回：[{ title, singer, source, data }, ...]
+    // 返回：[{ title, singer, source, data }, ...]（仅 qobuz）
     async function searchGDStudioSource(rootSource, keyword, limit) {
       try {
         const searchResults = await gdsSearchOnce(rootSource, keyword, limit);
@@ -1954,7 +963,7 @@
         const out = [];
         for (const sr of searchResults) {
           if (!sr || typeof sr !== "object") continue;
-          if (!("id" in sr) || !("source" in sr)) continue;
+          if (!("id" in sr) || !("source" in sr) || sr.source !== "qobuz") continue;
           try {
             const dlRes = await gdsFetchUrl(sr.source, sr.id);
             if (!dlRes || !dlRes.url) continue;
@@ -1962,168 +971,88 @@
             if (!downloadUrl.startsWith("http")) {
               downloadUrl = "https://music.gdstudio.xyz/" + downloadUrl;
             }
-            if (sr.source === "bilibili") {
-              downloadUrl = "https://music-proxy.gdstudio.org/" + downloadUrl;
-            }
 
             let lyricText = "";
             if (sr.lyric_id) {
               const lyRes = await gdsFetchLyric(sr.source, sr.lyric_id);
-              if (lyRes) {
-                lyricText = lyRes.lyric || lyRes.tlyric || "";
-              }
+              if (lyRes) lyricText = lyRes.lyric || lyRes.tlyric || "";
             }
 
             const title = sr.name || "Unknown";
-            const singer = Array.isArray(sr.artist)
-              ? sr.artist.join(", ")
-              : (sr.artist || "");
-
+            const singer = Array.isArray(sr.artist) ? sr.artist.join(", ") : (sr.artist || "");
             const cover = sr.pic || sr.cover || sr.picUrl || null;
             const link = sr.url || sr.link || null;
 
             const data = {
-              title: title,
-              singer: singer,
-              cover: cover,
-              music_url: downloadUrl,
-              lrc: lyricText || null,
-              link: link,
-              _source: sr.source
+              title, singer, cover, music_url: downloadUrl,
+              lrc: lyricText || null, link, _source: sr.source
             };
-
-            out.push({
-              title: title,
-              singer: singer,
-              source: sr.source,  // 例如 qobuz
-              data: data
-            });
-
+            out.push({ title, singer, source: sr.source, data });
             if (out.length >= limit) break;
-          } catch (e) {
-            console.error("gdstudio single item error", e);
-          }
+          } catch (e) { console.error("gdstudio single item error", e); }
         }
         return out;
-      } catch (e) {
-        console.error("searchGDStudioSource error", e);
-        return [];
-      }
+      } catch (e) { console.error("searchGDStudioSource error", e); return []; }
     }
 
-    // ================== 搜索逻辑 ==================
+    // ================== 搜索逻辑（MiGu / NetEase / 可选 Qobuz） ==================
     async function searchSongs(query) {
       const t = langStaticTexts[currentLang];
       try {
         let useMigu     = !sourceMiguCheckbox     || sourceMiguCheckbox.checked;
         let useNetease  = !sourceNeteaseCheckbox  || sourceNeteaseCheckbox.checked;
-        let useQobuz    = !sourceQobuzCheckbox    || sourceQobuzCheckbox.checked;
+        let useQobuz    = !sourceQobuzCheckbox    || sourceQobuzCheckbox.checked; // 默认未勾选 => false
 
         if (!useMigu && !useNetease && !useQobuz) {
-          useMigu = true;
-          if (sourceMiguCheckbox) sourceMiguCheckbox.checked = true;
+          useMigu = true; if (sourceMiguCheckbox) sourceMiguCheckbox.checked = true;
         }
 
-        const miguUrl =
-          API_MIGU +
-          "?msg=" +
-          encodeURIComponent(query) +
-          "&type=text";
+        const miguUrl = API_MIGU + "?msg=" + encodeURIComponent(query) + "&type=text";
+        const neteaseUrl = API_NETEASE_SEARCH + "?type=json&msg=" + encodeURIComponent(query) + "&num=" + NETEASE_LIMIT + "&n=";
 
-        const neteaseUrl =
-          API_NETEASE_SEARCH +
-          "?type=json&msg=" +
-          encodeURIComponent(query) +
-          "&num=" +
-          NETEASE_LIMIT +
-          "&n=";
+        const miguPromise = useMigu ? fetch(miguUrl).then((r) => r.text()).catch(() => null) : Promise.resolve(null);
+        const neteasePromise = useNetease ? fetch(neteaseUrl).then((r) => r.json()).catch(() => null) : Promise.resolve(null);
+        const qobuzPromise = useQobuz ? searchGDStudioSource("qobuz", query, PER_SOURCE_LIMIT) : Promise.resolve([]);
 
-        const miguPromise = useMigu
-          ? fetch(miguUrl).then((r) => r.text()).catch(() => null)
-          : Promise.resolve(null);
-        const neteasePromise = useNetease
-          ? fetch(neteaseUrl).then((r) => r.json()).catch(() => null)
-          : Promise.resolve(null);
-
-        const qobuzPromise = useQobuz
-          ? searchGDStudioSource("qobuz", query, PER_SOURCE_LIMIT)
-          : Promise.resolve([]);
-
-        const [miguText, neteaseJson, qobuzList] =
-          await Promise.all([
-            miguPromise,
-            neteasePromise,
-            qobuzPromise
-          ]);
+        const [miguText, neteaseJson, qobuzList] = await Promise.all([ miguPromise, neteasePromise, qobuzPromise ]);
 
         let miguListRaw = [];
         if (miguText) {
-          miguListRaw = parseSearchResultText(miguText).slice(0, 10); // 咪咕最多 10 条
+          // 咪咕最多 10 条
+          miguListRaw = parseSearchResultText(miguText).slice(0, 10);
         }
 
         let neteaseListRaw = [];
         if (neteaseJson && neteaseJson.code === 200 && Array.isArray(neteaseJson.data)) {
           neteaseListRaw = neteaseJson.data.slice(0, 10).map((it) => ({
-            index: it.n,
-            title: it.title,
-            singer: it.singer,
-            songid: it.songid
+            index: it.n, title: it.title, singer: it.singer, songid: it.songid
           }));
         }
 
-        const merged = [];
-        let globalIndex = 1;
-
+        const merged = []; let globalIndex = 1;
         if (useMigu) {
           miguListRaw.forEach((it) => {
-            merged.push({
-              globalIndex: globalIndex++,
-              title: it.title,
-              singer: it.singer,
-              source: "migu",
-              apiIndex: it.index
-            });
+            merged.push({ globalIndex: globalIndex++, title: it.title, singer: it.singer, source: "migu", apiIndex: it.index });
           });
         }
-
         if (useNetease) {
           neteaseListRaw.forEach((it) => {
-            merged.push({
-              globalIndex: globalIndex++,
-              title: it.title,
-              singer: it.singer,
-              source: "netease",
-              apiIndex: it.index,
-              songid: it.songid
-            });
+            merged.push({ globalIndex: globalIndex++, title: it.title, singer: it.singer, source: "netease", apiIndex: it.index, songid: it.songid });
           });
         }
-
         function pushGDList(list, sourceName) {
           list.forEach((it) => {
             if (!it || !it.title) return;
-            merged.push({
-              globalIndex: globalIndex++,
-              title: it.title,
-              singer: it.singer || "",
-              source: sourceName,
-              data: it.data || null
-            });
+            merged.push({ globalIndex: globalIndex++, title: it.title, singer: it.singer || "", source: sourceName, data: it.data || null });
           });
         }
-
-        if (useQobuz && Array.isArray(qobuzList)) {
-          pushGDList(qobuzList, "qobuz");
-        }
+        if (useQobuz && Array.isArray(qobuzList)) pushGDList(qobuzList, "qobuz");
 
         updateSourceSummary();
         renderResultList(merged, query);
 
-        if (!merged.length) {
-          setStatus(t.searchNoResult);
-        } else {
-          setStatus(t.searchResult(merged.length));
-        }
+        if (!merged.length) setStatus(t.searchNoResult);
+        else setStatus(t.searchResult(merged.length));
       } catch (err) {
         console.error(err);
         renderResultList([], query);
@@ -2132,21 +1061,15 @@
     }
 
     function parseSearchResultText(text) {
-      const lines = text
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => l && /^\d+[\.\、]/.test(l));
-
+      const lines = text.split("\n").map((l) => l.trim()).filter((l) => l && /^\d+[\.\、]/.test(l));
       const list = [];
       for (const line of lines) {
         const parts = line.split(" -- ");
         if (parts.length < 2) continue;
         const left = parts[0].trim();
         const singer = parts.slice(1).join(" -- ").trim();
-
         const idxMatch = left.match(/^(\d+)[\.\、](.+)$/);
         if (!idxMatch) continue;
-
         const index = parseInt(idxMatch[1], 10);
         const title = idxMatch[2].trim();
         list.push({ index, title, singer });
@@ -2164,9 +1087,7 @@
         resultsEl.appendChild(div);
         return;
       }
-
       const newPlaylist = [];
-
       list.forEach((item) => {
         const row = document.createElement("div");
         row.className = "result-item";
@@ -2196,7 +1117,6 @@
         const chipDot = document.createElement("span");
         chipDot.className = "source-chip-dot";
         const chipText = document.createElement("span");
-
         let label;
         if (item.source === "netease") label = t.sourceLabelNetease;
         else if (item.source === "qobuz") label = t.sourceLabelQobuz;
@@ -2223,7 +1143,6 @@
           songid: item.songid || null,
           data: item.data || null
         };
-
         newPlaylist.push(payload);
 
         const playBtn = document.createElement("button");
@@ -2254,13 +1173,9 @@
     function highlightActiveResult(globalIndex) {
       const rows = resultsEl.querySelectorAll(".result-item");
       rows.forEach((row) => {
-        row.classList.toggle(
-          "active",
-          globalIndex != null && row.dataset.index === String(globalIndex)
-        );
+        row.classList.toggle("active", globalIndex != null && row.dataset.index === String(globalIndex));
       });
     }
-
     function renderPlaylist() {
       const t = langStaticTexts[currentLang];
       playlistListEl.innerHTML = "";
@@ -2295,36 +1210,20 @@
         row.appendChild(main);
         row.appendChild(badge);
 
-        row.addEventListener("click", () => {
-          playFromPlaylist(idx);
-        });
-
+        row.addEventListener("click", () => { playFromPlaylist(idx); });
         playlistListEl.appendChild(row);
       });
-
-      playlistCountEl.textContent = playlist.length
-        ? t.playlistCount(playlist.length)
-        : t.playlistEmpty;
+      playlistCountEl.textContent = playlist.length ? t.playlistCount(playlist.length) : t.playlistEmpty;
     }
 
     async function fetchSongDetail(item) {
       if (item.source === "netease") {
         if (!item.songid) throw new Error("Missing NetEase songid");
-        const url =
-          API_NETEASE_DETAIL +
-          "?id=" +
-          encodeURIComponent(item.songid) +
-          "&type=json&level=lossless";
-
+        const url = API_NETEASE_DETAIL + "?id=" + encodeURIComponent(item.songid) + "&type=json&level=lossless";
         const resp = await fetch(url);
         const json = await resp.json();
-
-        if (json.code !== 200 || !json.data) {
-          throw new Error(json.msg || "Netease detail error");
-        }
-
+        if (json.code !== 200 || !json.data) throw new Error(json.msg || "Netease detail error");
         const raw = json.data || {};
-
         const data = {
           title: raw.title || raw.name || item.title,
           singer: raw.singer || raw.artist || raw.artists || item.singer,
@@ -2337,23 +1236,15 @@
         };
         return data;
       } else if (item.source === "migu") {
-        const url =
-          API_MIGU +
-          "?msg=" +
-          encodeURIComponent(item.query) +
-          "&type=json&n=" +
-          item.apiIndex;
+        const url = API_MIGU + "?msg=" + encodeURIComponent(item.query) + "&type=json&n=" + item.apiIndex;
         const resp = await fetch(url);
         const json = await resp.json();
-        if (json.code !== 200 || !json.data) {
-          throw new Error(json.msg || "Migu error");
-        }
-        const data = json.data;
-        data._source = "migu";
-        return data;
-      } else {
-        // 其它源（例如 qobuz）在 searchGDStudioSource 里已经填好 data
+        if (json.code !== 200 || !json.data) throw new Error(json.msg || "Migu error");
+        const data = json.data; data._source = "migu"; return data;
+      } else if (item.source === "qobuz") {
         if (item.data) return item.data;
+        throw new Error("Unsupported source"); // 正常不会到这里
+      } else {
         throw new Error("Unsupported source");
       }
     }
@@ -2365,79 +1256,41 @@
 
       let pos = playlist.findIndex((p) => {
         if (p.source !== item.source) return false;
-        if (item.source === "netease" && item.songid && p.songid) {
-          return p.songid === item.songid;
-        }
-        if (item.source === "migu") {
-          return p.query === item.query && p.apiIndex === item.apiIndex;
-        }
-        // 其它源（如 qobuz）：按 title + singer 粗略匹配
-        if (item.source !== "migu" && item.source !== "netease") {
-          return p.title === item.title && p.singer === item.singer;
-        }
+        if (item.source === "netease" && item.songid && p.songid) return p.songid === item.songid;
+        if (item.source === "migu") return p.query === item.query && p.apiIndex === item.apiIndex;
+        if (item.source === "qobuz") return p.title === item.title && p.singer === item.singer;
         return false;
       });
+      if (pos === -1) { playlist.push(item); pos = playlist.length - 1; }
+      currentPlaylistPos = pos; renderPlaylist();
 
-      if (pos === -1) {
-        playlist.push(item);
-        pos = playlist.length - 1;
-      }
-      currentPlaylistPos = pos;
-      renderPlaylist();
-
-      if (opts.fromSearch && opts.globalIndex != null) {
-        highlightActiveResult(opts.globalIndex);
-      }
-
+      if (opts.fromSearch && opts.globalIndex != null) highlightActiveResult(opts.globalIndex);
       setStatus(t.searchStatus(item.query));
       try {
         let data = item.data;
-        if (!data) {
-          data = await fetchSongDetail(item);
-          item.data = data;
-          playlist[pos].data = data;
-        }
-
+        if (!data) { data = await fetchSongDetail(item); item.data = data; playlist[pos].data = data; }
         updateNowPlaying(data);
         setStatus(t.statusPlaying(data.title));
         audioEl.play().catch(() => {});
         await loadLyricsForData(data);
-      } catch (err) {
-        console.error(err);
-        setStatus(t.statusSongError);
-      }
+      } catch (err) { console.error(err); setStatus(t.statusSongError); }
     }
 
     function playFromPlaylist(idx) {
       if (idx < 0 || idx >= playlist.length) return;
-      currentPlaylistPos = idx;
-      renderPlaylist();
-      const item = playlist[idx];
-      playSong(item, { fromPlaylist: true });
+      currentPlaylistPos = idx; renderPlaylist();
+      const item = playlist[idx]; playSong(item, { fromPlaylist: true });
     }
-
     function playNextInPlaylist(fromEnded = false) {
       if (!playlist.length) return;
-
       if (fromEnded && playMode === PLAY_MODE_SINGLE) {
-        if (currentPlaylistPos >= 0 && currentPlaylistPos < playlist.length) {
-          playFromPlaylist(currentPlaylistPos);
-        }
+        if (currentPlaylistPos >= 0 && currentPlaylistPos < playlist.length) playFromPlaylist(currentPlaylistPos);
         return;
       }
-
       let next = currentPlaylistPos + 1;
-
-      if (next >= playlist.length) {
-        if (fromEnded && playMode === PLAY_MODE_LOOP_ALL) {
-          next = 0;
-        } else {
-          return;
-        }
-      }
+      if (next >= playlist.length) { if (fromEnded && playMode === PLAY_MODE_LOOP_ALL) next = 0; else return; }
       playFromPlaylist(next);
     }
-
     function playPrevInPlaylist() {
       if (!playlist.length) return;
       let prev = currentPlaylistPos - 1;
@@ -2451,7 +1304,6 @@
 
       songTitleEl.textContent = data.title || t.nowPlayingIdleTitle;
       songSingerEl.textContent = data.singer || t.nowPlayingIdleSinger;
-
       songStatusShort.textContent = t.statePlaying;
 
       const cover = data.cover || data.pic || data.picUrl;
@@ -2476,106 +1328,64 @@
 
       let labelText = "";
       let dotClass = "source-migu";
-
       const t2 = langStaticTexts[currentLang];
-      if (type === "netease") {
-        labelText = t2.sourceLabelNetease;
-        dotClass = "source-netease";
-      } else if (type === "qobuz") {
-        labelText = t2.sourceLabelQobuz;
-        dotClass = "source-qobuz";
-      } else {
-        labelText = t2.sourceLabelMigu;
-        dotClass = "source-migu";
-      }
+      if (type === "netease") { labelText = t2.sourceLabelNetease; dotClass = "source-netease"; }
+      else if (type === "qobuz") { labelText = t2.sourceLabelQobuz; dotClass = "source-qobuz"; }
+      else { labelText = t2.sourceLabelMigu; dotClass = "source-migu"; }
 
       songSourceTextEl.textContent = labelText;
       const dotEl = songSourceTag.querySelector(".source-dot");
       if (dotEl) dotEl.className = "source-dot " + dotClass;
       songSourceTag.style.display = "inline-flex";
 
-      lrcEntries = [];
-      currentLyricIndex = -1;
+      lrcEntries = []; currentLyricIndex = -1;
       if (lyricsLinkWrap) lyricsLinkWrap.innerHTML = "";
       updateProgressBar();
     }
 
     async function loadLyricsForData(data) {
       const t = langStaticTexts[currentLang];
-      if (data.lrc_url) {
-        showLyricsPlaceholder(t.lyricsLoading);
-        await loadLyricsFromUrl(data.lrc_url);
-      } else if (data.lrc) {
-        showLyricsPlaceholder(t.lyricsLoading);
-        loadLyricsFromText(data.lrc);
-      } else {
-        showLyricsPlaceholder(t.lyricsNone);
-      }
+      if (data.lrc_url) { showLyricsPlaceholder(t.lyricsLoading); await loadLyricsFromUrl(data.lrc_url); }
+      else if (data.lrc) { showLyricsPlaceholder(t.lyricsLoading); loadLyricsFromText(data.lrc); }
+      else { showLyricsPlaceholder(t.lyricsNone); }
     }
-
     async function loadLyricsFromUrl(url) {
       const t = langStaticTexts[currentLang];
       try {
         const resp = await fetch(url);
         const text = await resp.text();
         const entries = parseLRC(text);
-        lrcEntries = entries;
-        currentLyricIndex = -1;
-        if (!entries.length) {
-          showLyricsPlaceholder(t.lyricsParseFail);
-          showRawLyricsLink(url);
-          return;
-        }
+        lrcEntries = entries; currentLyricIndex = -1;
+        if (!entries.length) { showLyricsPlaceholder(t.lyricsParseFail); showRawLyricsLink(url); return; }
         renderLyrics(entries);
-      } catch (err) {
-        console.error(err);
-        showLyricsPlaceholder(t.lyricsLoadFail);
-        showRawLyricsLink(url);
-      }
+      } catch (err) { console.error(err); showLyricsPlaceholder(t.lyricsLoadFail); showRawLyricsLink(url); }
     }
-
     function loadLyricsFromText(raw) {
       const t = langStaticTexts[currentLang];
       const entries = parseLRC(raw);
-      lrcEntries = entries;
-      currentLyricIndex = -1;
-      if (!entries.length) {
-        showLyricsPlaceholder(t.lyricsParseFail);
-        return;
-      }
+      lrcEntries = entries; currentLyricIndex = -1;
+      if (!entries.length) { showLyricsPlaceholder(t.lyricsParseFail); return; }
       renderLyrics(entries);
     }
-
     function parseLRC(raw) {
       const lines = raw.split("\n");
       const result = [];
       const timeTagRegex = /\[(\d+):(\d+(?:\.\d+)?)\]/g;
-
       for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-
-        let match;
-        const timeTags = [];
+        const trimmed = line.trim(); if (!trimmed) continue;
+        let match; const timeTags = [];
         while ((match = timeTagRegex.exec(trimmed))) {
           const min = parseInt(match[1], 10);
           const sec = parseFloat(match[2]);
-          const time = min * 60 + sec;
-          timeTags.push(time);
+          const time = min * 60 + sec; timeTags.push(time);
         }
-
         const text = trimmed.replace(timeTagRegex, "").trim();
         if (!timeTags.length || !text) continue;
-
-        timeTags.forEach((t) => {
-          result.push({ time: t, text: text });
-        });
+        timeTags.forEach((t) => { result.push({ time: t, text: text }); });
       }
-
       result.sort((a, b) => a.time - b.time);
       return result;
     }
-
     function renderLyrics(entries) {
       lyricsWrap.innerHTML = "";
       entries.forEach((entry, idx) => {
@@ -2594,46 +1404,28 @@
       const currentTime = audioEl.currentTime;
       let idx = currentLyricIndex;
       if (idx < 0 || currentTime < lrcEntries[idx].time) idx = 0;
-      while (
-        idx + 1 < lrcEntries.length &&
-        lrcEntries[idx + 1].time <= currentTime + 0.15
-      ) {
-        idx++;
-      }
-      if (idx !== currentLyricIndex) {
-        currentLyricIndex = idx;
-        updateActiveLyricLine(idx);
-      }
+      while (idx + 1 < lrcEntries.length && lrcEntries[idx + 1].time <= currentTime + 0.15) idx++;
+      if (idx !== currentLyricIndex) { currentLyricIndex = idx; updateActiveLyricLine(idx); }
     });
-
     function updateActiveLyricLine(idx) {
       const lines = lyricsWrap.querySelectorAll(".lyric-line");
       lines.forEach((el) => {
         const lineIdx = parseInt(el.dataset.index, 10);
         el.classList.toggle("active", lineIdx === idx);
       });
-      const activeEl = lyricsWrap.querySelector(
-        '.lyric-line[data-index="' + idx + '"]'
-      );
-      if (activeEl) {
-        activeEl.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
+      const activeEl = lyricsWrap.querySelector('.lyric-line[data-index="' + idx + '"]');
+      if (activeEl) { activeEl.scrollIntoView({ behavior: "smooth", block: "center" }); }
     }
 
     audioEl.addEventListener("play", () => {
       const t = langStaticTexts[currentLang];
       songStatusShort.textContent = t.statePlaying;
     });
-
     audioEl.addEventListener("pause", () => {
       const t = langStaticTexts[currentLang];
-      if (audioEl.ended) {
-        songStatusShort.textContent = t.stateEnded;
-      } else {
-        songStatusShort.textContent = t.statePaused;
-      }
+      if (audioEl.ended) songStatusShort.textContent = t.stateEnded;
+      else songStatusShort.textContent = t.statePaused;
     });
-
     audioEl.addEventListener("ended", () => {
       const t = langStaticTexts[currentLang];
       songStatusShort.textContent = t.stateEnded;
@@ -2643,46 +1435,24 @@
     toggleLyricsBtn.addEventListener("click", () => {
       lyricsVisible = !lyricsVisible;
       lyricsWrap.style.display = lyricsVisible ? "block" : "none";
-      if (lyricsLinkWrap)
-        lyricsLinkWrap.style.display = lyricsVisible ? "block" : "none";
+      if (lyricsLinkWrap) lyricsLinkWrap.style.display = lyricsVisible ? "block" : "none";
     });
-
     function togglePlayPause() {
       if (!audioEl.src) return;
       if (audioEl.paused) audioEl.play().catch(() => {});
       else audioEl.pause();
     }
-
     window.addEventListener("keydown", (e) => {
       const tag = (e.target.tagName || "").toLowerCase();
-      if (tag === "input" || tag === "textarea" || e.target.isContentEditable)
-        return;
-
-      if (e.code === "Space") {
-        e.preventDefault();
-        togglePlayPause();
-      } else if (e.code === "ArrowRight") {
-        if (!isNaN(audioEl.duration)) {
-          audioEl.currentTime = Math.min(
-            audioEl.duration,
-            audioEl.currentTime + 5
-          );
-        }
-      } else if (e.code === "ArrowLeft") {
-        audioEl.currentTime = Math.max(0, audioEl.currentTime - 5);
-      } else if (e.code === "ArrowUp") {
-        e.preventDefault();
-        audioEl.volume = Math.min(1, audioEl.volume + 0.05);
-      } else if (e.code === "ArrowDown") {
-        e.preventDefault();
-        audioEl.volume = Math.max(0, audioEl.volume - 0.05);
-      } else if (e.key === "n" || e.key === "N") {
-        playNextInPlaylist(false);
-      } else if (e.key === "p" || e.key === "P") {
-        playPrevInPlaylist();
-      } else if (e.key === "m" || e.key === "M") {
-        if (playModeBtn) playModeBtn.click();
-      }
+      if (tag === "input" || tag === "textarea" || e.target.isContentEditable) return;
+      if (e.code === "Space") { e.preventDefault(); togglePlayPause(); }
+      else if (e.code === "ArrowRight") { if (!isNaN(audioEl.duration)) audioEl.currentTime = Math.min(audioEl.duration, audioEl.currentTime + 5); }
+      else if (e.code === "ArrowLeft") { audioEl.currentTime = Math.max(0, audioEl.currentTime - 5); }
+      else if (e.code === "ArrowUp") { e.preventDefault(); audioEl.volume = Math.min(1, audioEl.volume + 0.05); }
+      else if (e.code === "ArrowDown") { e.preventDefault(); audioEl.volume = Math.max(0, audioEl.volume - 0.05); }
+      else if (e.key === "n" || e.key === "N") { playNextInPlaylist(false); }
+      else if (e.key === "p" || e.key === "P") { playPrevInPlaylist(); }
+      else if (e.key === "m" || e.key === "M") { if (playModeBtn) playModeBtn.click(); }
     });
 
     // 初始状态
