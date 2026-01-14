@@ -1,0 +1,131 @@
+:root {
+  --primary-color: #1ecf9f;
+  --bg-body: #f3f4f6;
+  --card-bg: #ffffff;
+  --text-main: #333333;
+  --text-sub: #888888;
+  --border-color: #eeeeee;
+  --shadow-float: 0 8px 30px rgba(0,0,0,0.12);
+}
+
+body {
+  margin: 0; padding: 0;
+  font-family: "PingFang SC", "Microsoft YaHei", sans-serif;
+  background: var(--bg-body);
+  display: flex; justify-content: center; align-items: center;
+  height: 100vh; color: var(--text-main);
+}
+
+.login-container {
+  background: var(--card-bg);
+  padding: 50px 40px;
+  border-radius: 24px;
+  box-shadow: var(--shadow-float);
+  width: 100%; max-width: 400px;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 顶部装饰条 */
+.login-container::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 6px;
+    background: linear-gradient(90deg, #1ecf9f, #2bd9d9);
+}
+
+.logo {
+  font-size: 28px; font-weight: 800; color: var(--primary-color);
+  margin-bottom: 40px; letter-spacing: 2px;
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+}
+
+.form-group { margin-bottom: 24px; text-align: left; }
+
+.input-wrapper { position: relative; }
+.input-wrapper input {
+  width: 100%; padding: 14px 15px 14px 44px;
+  border: 1px solid transparent; background: #f8f8f8;
+  border-radius: 12px; font-size: 14px; color: var(--text-main);
+  transition: all 0.3s; box-sizing: border-box;
+}
+.input-wrapper input:focus {
+  background: white; border-color: var(--primary-color);
+  box-shadow: 0 4px 12px rgba(30,207,159,0.1); outline: none;
+}
+.input-icon {
+  position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+  color: #bbb; font-size: 16px; transition: color 0.3s;
+}
+.input-wrapper input:focus + .input-icon { color: var(--primary-color); } /* 需要HTML调整顺序才能生效CSS选择器，或者用JS。这里简单处理 */
+
+.btn-primary {
+  width: 100%; padding: 14px;
+  background: var(--primary-color); color: white;
+  border: none; border-radius: 12px;
+  font-size: 16px; font-weight: 600; cursor: pointer;
+  transition: all 0.2s; margin-top: 10px;
+  box-shadow: 0 4px 12px rgba(30,207,159,0.3);
+}
+.btn-primary:hover { background: #15b38a; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(30,207,159,0.4); }
+.btn-primary:active { transform: translateY(0); }
+
+.footer-links { margin-top: 25px; font-size: 13px; color: var(--text-sub); }
+.footer-links a { color: var(--primary-color); text-decoration: none; font-weight: 500; cursor: pointer; margin-left: 5px; }
+.footer-links a:hover { text-decoration: underline; }
+
+/* Toast 提示 (顶部居中, 绿色) */
+.toast-container {
+    position: fixed; top: 40px; left: 50%; transform: translateX(-50%);
+    z-index: 3000; display: flex; flex-direction: column; gap: 10px;
+    pointer-events: none;
+}
+.toast {
+    padding: 16px 32px; border-radius: 50px;
+    background: white; color: #333;
+    font-size: 15px; font-weight: 600;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+    display: flex; align-items: center; gap: 12px;
+    animation: slideDown 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    min-width: 260px; justify-content: center;
+}
+/* 成功: 绿底白字 或 白底绿字+边框 */
+.toast.success, .toast.login-success, .toast.register-success {
+    background: #e6fffa; color: #1ecf9f; 
+    border: 2px solid #1ecf9f;
+}
+.toast.error {
+    background: #fff5f5; color: #ff5252;
+    border: 2px solid #ff5252;
+}
+.toast i { font-size: 20px; }
+
+/* 登录/注册成功 大尺寸样式 */
+.toast.login-success, .toast.register-success {
+    padding: 20px 50px;
+    font-size: 18px;
+    box-shadow: 0 15px 40px rgba(30,207,159,0.3);
+}
+
+@keyframes slideDown {
+    from { transform: translateY(-30px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+}
+
+/* 模态框背景 */
+.dialog-overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+    z-index: 2000; display: none; align-items: center; justify-content: center;
+    backdrop-filter: blur(5px);
+}
+.dialog-overlay.show { display: flex; }
+.dialog-box {
+    background: white; border-radius: 20px;
+    box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+    overflow: hidden;
+    animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+@keyframes popIn {
+    from { transform: scale(0.9); opacity: 0; }
+    to { transform: scale(1); opacity: 1; }
+}
+
