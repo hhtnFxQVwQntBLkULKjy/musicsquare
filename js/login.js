@@ -5,7 +5,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const goLoginBtn = document.getElementById('go-login');
     const loginBtn = document.getElementById('login-btn');
     const registerBtn = document.getElementById('register-btn');
-    
+
     // Toast Helper
     function showToast(msg, type = 'error') {
         const container = document.querySelector('.toast-container') || createToastContainer();
@@ -89,20 +89,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             await AuthService.login(username, password);
-            
+
             if (remember) {
                 localStorage.setItem('rememberedUser', username);
             } else {
                 localStorage.removeItem('rememberedUser');
             }
-            
+
             // Show Large Success Toast
             const container = document.querySelector('.toast-container') || createToastContainer();
             const toast = document.createElement('div');
             toast.className = 'toast login-success';
             toast.innerHTML = `<i class="fas fa-check-circle" style="font-size:24px;"></i> 登录成功，即将跳转...`;
             container.appendChild(toast);
-            
+
             setTimeout(() => window.location.href = 'home.html', 1500);
         } catch (e) {
             showToast(e.message || '登录失败，请检查用户名或密码', 'error');
@@ -133,26 +133,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             await AuthService.register(username, password);
-            
+
             // Auto-fill login form
             document.getElementById('username').value = username;
             document.getElementById('password').value = password;
-            
+
             // Show Large Register Success Toast
             const container = document.querySelector('.toast-container') || createToastContainer();
             const toast = document.createElement('div');
             toast.className = 'toast register-success';
             toast.innerHTML = `<i class="fas fa-check-circle" style="font-size:24px;"></i> 注册成功，正在为您登录...`;
             container.appendChild(toast);
-            
+
             // Switch to login view immediately
             goLoginBtn.click();
-            
+
             // Auto click login after 1.5s
             setTimeout(() => {
                 loginBtn.click();
             }, 1500);
-            
+
         } catch (e) {
             let msg = e.message;
             if (msg.includes('exists') || msg.includes('Username already exists')) msg = '该账号已存在，请直接登录';
@@ -161,6 +161,27 @@ document.addEventListener('DOMContentLoaded', () => {
         } finally {
             registerBtn.disabled = false;
             registerBtn.textContent = '注册';
+        }
+    });
+
+    // Enter key bindings
+    const loginInputs = ['username', 'password'];
+    loginInputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') loginBtn.click();
+            });
+        }
+    });
+
+    const regInputs = ['reg-username', 'reg-password', 'reg-password-confirm'];
+    regInputs.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') registerBtn.click();
+            });
         }
     });
 });
