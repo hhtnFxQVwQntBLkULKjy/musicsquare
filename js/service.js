@@ -1,5 +1,5 @@
 
-const API_BASE = 'https://yunduanyingyue.tmichi1001.workers.dev/api';
+const API_BASE = 'https://api.yexin.de5.net/api';
 
 const AuthService = {
     get currentUser() {
