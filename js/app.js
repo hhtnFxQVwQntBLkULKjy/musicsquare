@@ -499,9 +499,14 @@ document.addEventListener('DOMContentLoaded', async () => {
             placeholder: '请输入歌单名称',
             onConfirm: async (name) => {
                 if (name) {
-                    await DataService.createPlaylist(name);
-                    renderSidebarPlaylists();
-                    UI.uniDialog.classList.remove('show');
+                    try {
+                        await DataService.createPlaylist(name);
+                        UI.showToast('歌单创建成功', 'success');
+                        renderSidebarPlaylists();
+                        UI.uniDialog.classList.remove('show');
+                    } catch (e) {
+                        UI.showToast('新建歌单失败', 'error');
+                    }
                 }
             }
         });
