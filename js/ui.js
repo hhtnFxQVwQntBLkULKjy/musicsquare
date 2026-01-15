@@ -14,7 +14,24 @@ const UI = {
         this.overlay = document.getElementById('player-overlay');
         this.lyricsPanel = document.getElementById('lyrics-panel');
         this.cdWrapper = document.getElementById('cd-wrapper');
-        
+        this.downloadBtn = document.getElementById('download-btn');
+
+        // Theme Toggle
+        this.themeToggle = document.getElementById('theme-toggle');
+        if (this.themeToggle) {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', savedTheme);
+            this.themeToggle.innerHTML = savedTheme === 'dark' ? '<i class="fas fa-moon"></i>' : '<i class="fas fa-sun"></i>';
+
+            this.themeToggle.addEventListener('click', () => {
+                const current = document.documentElement.getAttribute('data-theme');
+                const next = current === 'dark' ? 'light' : 'dark';
+                document.documentElement.setAttribute('data-theme', next);
+                localStorage.setItem('theme', next);
+                this.themeToggle.innerHTML = next === 'dark' ? '<i class="fas fa-moon"></i>' : '<i class="fas fa-sun"></i>';
+            });
+        }
+
         // Dialog Elements
         this.uniDialog = document.getElementById('uni-dialog');
         this.dialogTitle = document.getElementById('dialog-title');
@@ -46,7 +63,7 @@ const UI = {
             let width = e.clientX;
             if (width < 180) width = 180;
             if (width > 400) width = 400;
-            
+
             document.documentElement.style.setProperty('--sidebar-width', `${width}px`);
             if (playerBar) playerBar.style.left = `${width + 20}px`;
             if (overlay) overlay.style.left = `${width}px`;
@@ -109,7 +126,7 @@ const UI = {
         document.getElementById('player-info-area').addEventListener('click', toggleOverlay);
         document.getElementById('overlay-close').addEventListener('click', toggleOverlay);
         document.getElementById('overlay-cover').addEventListener('click', toggleOverlay);
-        
+
         if (this.downloadBtn) {
             this.downloadBtn.onclick = () => {
                 if (player.currentTrack) {
@@ -127,11 +144,11 @@ const UI = {
         const toast = document.createElement('div');
         toast.className = `toast ${type}`;
         // Force high z-index and visibility
-        toast.style.zIndex = '9999'; 
+        toast.style.zIndex = '9999';
         const icon = type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle';
         toast.innerHTML = `<i class="fas ${icon}"></i> <span>${msg}</span>`;
         container.appendChild(toast);
-        
+
         // Ensure animation plays
         requestAnimationFrame(() => {
             toast.style.opacity = '1';
@@ -139,10 +156,26 @@ const UI = {
         });
 
         setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.transform = 'translateY(-20px)';
-            setTimeout(() => toast.remove(), 300);
+            if (toast.parentElement) {
+                toast.style.opacity = '0';
+                toast.style.transform = 'translateY(-20px)';
+                setTimeout(() => toast.remove(), 300);
+            }
         }, 3000);
+    },
+
+    clearToasts() {
+        const toasts = document.querySelectorAll('.toast');
+        toasts.forEach(t => t.remove());
+    },
+
+    clearLoadingToasts() {
+        const toasts = document.querySelectorAll('.toast');
+        toasts.forEach(t => {
+            if (t.textContent.includes('正在加载') || t.textContent.includes('正在搜索')) {
+                t.remove();
+            }
+        });
     },
 
     createToastContainer() {
@@ -181,7 +214,7 @@ const UI = {
             this.dialogContent.appendChild(content);
         }
         this.dialogCancel.style.display = showCancel ? 'block' : 'none';
-        
+
         // Always reset confirm button visibility
         if (onConfirm) {
             this.dialogConfirm.style.display = 'block';
@@ -192,7 +225,7 @@ const UI = {
         } else {
             this.dialogConfirm.style.display = 'none';
         }
-        
+
         this.uniDialog.classList.add('show');
     },
 
@@ -240,28 +273,28 @@ const UI = {
             `;
             // BIND CLICK EVENT DIRECTLY TO ITEM
             item.addEventListener('click', async (e) => {
-                e.preventDefault(); 
+                e.preventDefault();
                 e.stopPropagation(); // Stop propagation
-                
+
                 // 1. Show loading state if needed, or just optimistic update
                 // Close Dialog FIRST
                 this.uniDialog.classList.remove('show');
-                
+
                 // Show immediate feedback
                 this.showToast('正在添加到歌单...', 'success');
 
                 try {
                     // 2. Call Service
                     const success = await DataService.addSongToPlaylist(pl.id, song);
-                    
+
                     if (success) {
                         this.showToast(`已成功添加到: ${pl.name}`, 'success');
                         // 3. Dispatch Global Event
                         const event = new CustomEvent('playlist-updated', { detail: { id: pl.id } });
                         document.dispatchEvent(event);
                     } else {
-                         // Fallback if success is false but no error thrown (e.g. optimistic revert)
-                         this.showToast('添加失败：可能歌曲已存在', 'error');
+                        // Fallback if success is false but no error thrown (e.g. optimistic revert)
+                        this.showToast('添加失败：可能歌曲已存在', 'error');
                     }
                 } catch (err) {
                     console.error('Add to playlist UI error:', err);
@@ -276,7 +309,7 @@ const UI = {
         this.showDialog({
             title: '添加到歌单',
             content: list,
-            showCancel: true 
+            showCancel: true
         });
         this.dialogConfirm.style.display = 'none';
     },
@@ -300,7 +333,7 @@ const UI = {
         `;
     },
 
-    renderSongList(songs, currentPage, totalPages, onPageChange, isLocal = false) {
+    renderSongList(songs, currentPage, totalPages, onPageChange, isLocal = false, viewType = 'search', currentPlaylistId = null) {
         this.songListContainer.innerHTML = '';
         if (songs.length === 0) {
             this.renderEmptyState('没有找到相关歌曲');
@@ -311,69 +344,90 @@ const UI = {
         header.innerHTML = `<div>#</div><div>标题</div><div>歌手</div><div>专辑</div><div>时长</div><div style="text-align: right">操作</div>`;
         this.songListContainer.appendChild(header);
 
+        // 保存当前视图信息用于删除操作
+        this._currentViewType = viewType;
+        this._currentPlaylistId = currentPlaylistId;
+
         songs.forEach((song, index) => {
             const div = document.createElement('div');
             div.className = 'song-item';
-            const favs = JSON.parse(localStorage.getItem('favorites') || '[]');
-            const isFav = favs.some(f => f.id === song.id);
+
+            // Re-apply: Click to play
+            div.onclick = (e) => {
+                // Prevent playing if clicking action buttons or if unplayable
+                if (e.target.closest('.btn-action') || e.target.closest('.col-actions')) return;
+
+                if (song.unplayable) {
+                    this.showToast('该歌曲暂时无法播放', 'error');
+                    return;
+                }
+
+                if (window.player) {
+                    // Fix: Set playlist context so "Next" works
+                    // Find index in the original songs array
+                    const idx = index;
+                    window.player.setPlaylist(songs, idx);
+                } else {
+                    console.error('Player not initialized');
+                }
+            };
+
+            // Check if this song is currently playing
+            if (window.player && window.player.currentTrack && window.player.currentTrack.id === song.id) {
+                div.classList.add('playing');
+            }
+
+            if (song.unplayable) {
+                div.classList.add('unplayable');
+            }
+
+            // 使用 DataService 判断是否已收藏
+            const isFav = DataService.isFavorite(song);
             const favClass = isFav ? 'fas fa-heart active' : 'far fa-heart';
+            // 仅歌单页面显示删除按钮，收藏页面不显示（取消收藏=删除）
+            const showDeleteBtn = viewType === 'playlist';
             div.innerHTML = `
                 <div class="col-index">${(currentPage - 1) * 20 + index + 1}</div>
-                <div class="col-title">${song.title} <span style="font-size:10px;color:#ccc;border:1px solid #eee;padding:0 2px;border-radius:2px;margin-left:5px;">${this.getSourceName(song.source)}</span></div>
+                <div class="col-title">${song.title} <span class="source-tag">${this.getSourceName(song.source)}</span></div>
                 <div class="col-artist">${song.artist}</div>
                 <div class="col-album">${song.album || '-'}</div>
                 <div class="col-duration">${this.formatTime(song.duration)}</div>
                 <div class="col-actions">
-                    <button class="btn-action fav ${isFav ? 'active' : ''}" title="收藏"><i class="${favClass}"></i></button>
+                    <button class="btn-action fav ${isFav ? 'active' : ''}" title="${isFav ? '取消收藏' : '收藏'}"><i class="${favClass}"></i></button>
                     <button class="btn-action download-btn" title="下载"><i class="fas fa-download"></i></button>
                     <button class="btn-action more-btn" title="更多"><i class="fas fa-ellipsis-h"></i></button>
-                    <button class="btn-action del-song-btn" title="从歌单删除" style="color:#ff5252; display: ${isLocal ? 'flex' : 'none'}"><i class="fas fa-trash"></i></button>
+                    <button class="btn-action del-song-btn" title="从歌单删除" style="color:#ff5252; display: ${showDeleteBtn ? 'flex' : 'none'}"><i class="fas fa-trash"></i></button>
                 </div>
             `;
-            
+
             // ... (events)
-            
+
             div.querySelector('.more-btn').onclick = (e) => {
                 e.stopPropagation();
                 this.showSongContextMenu(e.clientX, e.clientY, song);
             };
 
             const delBtn = div.querySelector('.del-song-btn');
-            if (delBtn) {
-                 // Use addEventListener to avoid overwriting or propagation issues
-                 delBtn.addEventListener('click', (e) => {
-                     e.stopPropagation();
-                     
-                     // We need to find the CURRENT playlist ID more reliably
-                     // 1. Check if we are in 'playlist' view
-                     const currentView = document.querySelector('.nav-item.active');
-                     if (!currentView || !currentView.classList.contains('pl-nav-item')) {
-                         console.error('Cannot delete: Not in a playlist view');
-                         return;
-                     }
-                     
-                     const plName = currentView.querySelector('span').textContent;
-                     // Find playlist by name AND ID (if possible, but name is what we have in DOM)
-                     // A better way is to store data-id on the nav item. 
-                     // Let's rely on DataService.playlists finding it.
-                     const pl = DataService.playlists.find(p => p.name === plName);
-                     
-                     if (pl) {
-                         this.showDialog({
-                             title: '删除歌曲',
-                             content: `确定从歌单 "${pl.name}" 中删除 "${song.title}" 吗？`,
-                             onConfirm: async () => {
-                                 await DataService.removeSongFromPlaylist(pl.id, song.uid || song.id);
-                                 // Refresh
-                                 const event = new CustomEvent('playlist-updated', { detail: { id: pl.id } });
-                                 document.dispatchEvent(event);
-                                 this.showToast('已删除');
-                             }
-                         });
-                     } else {
-                         console.error('Playlist not found in cache');
-                     }
-                 });
+            if (delBtn && showDeleteBtn) {
+                delBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+
+                    const plId = this._currentPlaylistId;
+                    /* Use loose comparison for IDs (string vs number) */
+                    const pl = DataService.playlists.find(p => p.id == plId);
+                    const plName = pl ? pl.name : '当前歌单';
+
+                    this.showDialog({
+                        title: '删除歌曲',
+                        content: `确定从歌单 "${plName}" 中删除 "${song.title}" 吗？`,
+                        onConfirm: async () => {
+                            await DataService.removeSongFromPlaylist(plId, song.uid || song.id);
+                            // Optimistic UI update: remove element immediately
+                            div.remove();
+                            this.showToast('已删除');
+                        }
+                    });
+                });
             }
             div.querySelector('.download-btn').onclick = (e) => {
                 e.stopPropagation();
@@ -391,18 +445,65 @@ const UI = {
 
     toggleFavorite(song, btnEl) {
         if (DataService.isFavorite(song)) {
-            DataService.removeFavorite(song.uid);
+            DataService.removeFavorite(song.uid || song.id);
             btnEl.classList.remove('active');
             btnEl.querySelector('i').className = 'far fa-heart';
+            btnEl.title = '收藏';
+            // 如果在收藏页面，触发刷新
+            if (this._currentViewType === 'favorites') {
+                document.dispatchEvent(new CustomEvent('favorites-updated'));
+            }
         } else {
             DataService.addFavorite(song);
             btnEl.classList.add('active');
             btnEl.querySelector('i').className = 'fas fa-heart';
+            btnEl.title = '取消收藏';
         }
     },
 
+    handleDownload(song) {
+        if (!song || !song.url) {
+            this.showDialog({
+                title: '提示',
+                content: '当前歌曲尚未加载播放链接，请先点击播放后再尝试下载。',
+                showCancel: false
+            });
+            return;
+        }
+        const a = document.createElement('a');
+        a.href = song.url;
+        a.download = `${song.title} - ${song.artist}.mp3`;
+        a.target = '_blank';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+    },
+
+    setLyrics(lyrics) {
+        if (!this.lyricsPanel) return;
+        this.lyricsPanel.innerHTML = '';
+        if (!lyrics || lyrics.length === 0) {
+            const p = document.createElement('div');
+            p.className = 'lrc-p';
+            p.textContent = '暂无歌词';
+            this.lyricsPanel.appendChild(p);
+            return;
+        }
+
+        lyrics.forEach((line, index) => {
+            const p = document.createElement('div');
+            p.className = 'lrc-p';
+            p.dataset.index = index;
+            p.textContent = line.text;
+            p.onclick = () => {
+                if (window.player) window.player.audio.currentTime = line.time;
+            };
+            this.lyricsPanel.appendChild(p);
+        });
+    },
+
     getSourceName(source) {
-        const map = { 'netease': '网易', 'qq': 'QQ', 'kuwo': '酷我', 'migu': '咪咕' };
+        const map = { 'netease': '网易', 'qq': 'QQ', 'tencent': 'QQ', 'kuwo': '酷我', 'migu': '咪咕' };
         return map[source] || source;
     },
 
@@ -444,20 +545,20 @@ const UI = {
         const playNext = document.getElementById('ctx-play-next');
         const addPl = document.getElementById('ctx-add-pl');
         const download = document.getElementById('ctx-download'); // New
-        
+
         const newPlayNext = playNext.cloneNode(true);
         const newAddPl = addPl.cloneNode(true);
         const newDownload = download ? download.cloneNode(true) : null; // Handle if exists or create dynamically if not in HTML
 
         playNext.parentNode.replaceChild(newPlayNext, playNext);
         addPl.parentNode.replaceChild(newAddPl, addPl);
-        
+
         if (download && newDownload) {
-             download.parentNode.replaceChild(newDownload, download);
-             newDownload.onclick = () => {
-                 menu.style.display = 'none';
-                 this.handleDownload(song);
-             };
+            download.parentNode.replaceChild(newDownload, download);
+            newDownload.onclick = () => {
+                menu.style.display = 'none';
+                this.handleDownload(song);
+            };
         }
 
         newPlayNext.onclick = () => {
@@ -471,8 +572,12 @@ const UI = {
     },
 
     handleDownload(song) {
-        if (!song.url) {
-            this.showDialog({ title: '提示', content: '未加载完成，请点击该歌曲播放后再点击下载', showCancel: false });
+        if (!song || !song.url) {
+            this.showDialog({
+                title: '提示',
+                content: '当前歌曲尚未加载播放链接，请先点击播放后再尝试下载。',
+                showCancel: false
+            });
             return;
         }
         window.open(song.url, '_blank');

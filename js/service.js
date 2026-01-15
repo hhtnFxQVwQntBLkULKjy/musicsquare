@@ -16,7 +16,7 @@ const AuthService = {
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || 'Login failed');
-            
+
             // Save user info (which acts as token for now)
             localStorage.setItem('currentUser', JSON.stringify(data.user));
             return data.user;
@@ -69,35 +69,6 @@ const DataService = {
     },
 
     async syncPlatform(platform, link) {
-        try {
-            const res = await fetch(`${API_BASE}/sync`, {
-                method: 'POST',
-                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ platform, link })
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || '同步失败');
-            return data;
-        } catch (e) {
-            console.error('Sync Error:', e);
-            throw e;
-        }
-    },
-
-    async importPlaylists(platform, externalId, playlists) {
-        try {
-            const res = await fetch(`${API_BASE}/sync/import`, {
-                method: 'POST',
-                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ platform, id: externalId, playlists })
-            });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || '同步保存失败');
-            return data;
-        } catch (e) {
-            console.error('Import Error:', e);
-            throw e;
-        }
     },
 
     // --- Favorites ---
@@ -217,16 +188,16 @@ const DataService = {
             await this.fetchPlaylists();
             pl = this.playlists.find(p => p.id === playlistId);
         }
-        
+
         if (!pl) return false;
 
         // Check for duplicate using both id and uid
-        if (pl.tracks.some(t => (song.id && t.id === song.id) || (song.uid && t.uid === song.uid))) return false; 
-        
+        if (pl.tracks.some(t => (song.id && t.id === song.id) || (song.uid && t.uid === song.uid))) return false;
+
         // Optimistic update
         const tempTrack = { ...song };
         pl.tracks.push(tempTrack);
-        
+
         try {
             const res = await fetch(`${API_BASE}/playlists/${playlistId}/songs`, {
                 method: 'POST',
@@ -240,16 +211,16 @@ const DataService = {
                     tempTrack.uid = data.uid;
                 }
                 // Also trigger a full refresh to be safe, but asynchronously
-                this.fetchPlaylists(); 
+                this.fetchPlaylists();
                 return true;
             }
-            
+
             const data = await res.json().catch(() => ({}));
             throw new Error(data.error || 'Backend save failed');
         } catch (e) {
             console.error('Add Song to Playlist Error:', e);
             // Revert optimistic update
-            pl.tracks = pl.tracks.filter(t => t !== tempTrack); 
+            pl.tracks = pl.tracks.filter(t => t !== tempTrack);
             throw e;
         }
     },

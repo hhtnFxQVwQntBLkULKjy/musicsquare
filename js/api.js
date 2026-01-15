@@ -1,7 +1,7 @@
 const MusicAPI = {
     // Configuration
     sources: ['netease', 'qq', 'kuwo', 'migu'],
-    
+
     // API Endpoints
     endpoints: {
         migu: 'https://api.xcvts.cn/api/music/migu',
@@ -10,20 +10,41 @@ const MusicAPI = {
         meting: 'https://api.qijieya.cn/meting/',
     },
 
+    searchCache: new Map(),
+
     async search(keyword, source, page = 1, limit = 20) {
         if (!keyword) return [];
+
+        const cacheKey = `${source}:${keyword}:${page}:${limit}`;
+        if (this.searchCache.has(cacheKey)) {
+            return this.searchCache.get(cacheKey);
+        }
+
         try {
-            switch(source) {
+            let results = [];
+            switch (source) {
                 case 'migu':
-                    return await this.searchMigu(keyword, page, limit);
+                    results = await this.searchMigu(keyword, page, limit);
+                    break;
                 case 'netease':
-                    return await this.searchNetease(keyword, page, limit);
+                    results = await this.searchNetease(keyword, page, limit);
+                    break;
                 case 'qq':
                 case 'kuwo':
-                    return await this.searchCommon(keyword, source, page, limit);
+                    results = await this.searchCommon(keyword, source, page, limit);
+                    break;
                 default:
-                    return [];
+                    results = [];
             }
+
+            // Cache management: max 100 entries
+            if (this.searchCache.size > 100) {
+                const firstKey = this.searchCache.keys().next().value;
+                this.searchCache.delete(firstKey);
+            }
+            this.searchCache.set(cacheKey, results);
+
+            return results;
         } catch (e) {
             console.error(`Search error [${source}]:`, e);
             return [];
@@ -31,25 +52,24 @@ const MusicAPI = {
     },
 
     async searchMigu(keyword, page, limit) {
-        // Follow yuanshi.html: n parameter should be empty for search
         const url = `${this.endpoints.migu}?gm=${encodeURIComponent(keyword)}&n=&num=${limit}&type=json`;
         const res = await fetch(url);
         const json = await res.json();
-        
+
         if (json.code !== 200 || !Array.isArray(json.data)) return [];
 
         return json.data.map(item => ({
             id: `migu-${item.title}-${item.singer}`,
-            miguId: item.n, // Critical for details
-            keyword: keyword, // Store keyword for detail fetch
+            miguId: item.n,
+            keyword: keyword,
             title: item.title,
             artist: item.singer,
             album: '',
             cover: item.cover,
             source: 'migu',
             duration: 0,
-            url: item.music_url || null, // Some results might have it
-            lrc: item.lrc_url || null, // Store URL first
+            url: item.music_url || null,
+            lrc: item.lrc_url || null,
             originalData: item
         }));
     },
@@ -91,154 +111,150 @@ const MusicAPI = {
             cover: item.pic,
             source: source,
             url: item.url,
-            lrc: item.lrc,
+            lrc: item.lrc_url || item.lrc,
             originalData: item
         }));
     },
 
     async getSongDetails(track) {
         try {
-            // Migu Detail Fetch (replicate yuanshi.html logic)
+            // 1. Specific Platform Handling
             if (track.source === 'migu') {
                 const n = track.miguId || 1;
-                const kw = track.keyword || track.title; // Fallback
+                const kw = track.keyword || track.title;
                 const url = `${this.endpoints.migu}?gm=${encodeURIComponent(kw)}&n=${n}&num=20&type=json`;
-                
                 const res = await fetch(url);
                 const json = await res.json();
-                
                 if (json.code === 200) {
-                    track.title = json.title || track.title;
-                    track.artist = json.singer || track.artist;
-                    track.cover = json.cover || track.cover;
                     track.url = json.music_url || track.url;
-                    track.lrc = json.lrc_url || track.lrc; // Update lrc url
+                    track.lrc = json.lrc_url || track.lrc;
+                    track.cover = json.cover || track.cover;
+                }
+            } else if (track.source === 'netease') {
+                let songId = track.songId || (track.id.includes('-') ? track.id.split('-')[1] : track.id);
+                try {
+                    const lyricRes = await fetch(`https://api.vkeys.cn/v2/music/netease/lyric?id=${songId}`);
+                    const lyricData = await lyricRes.json();
+                    if (lyricData && lyricData.code === 200 && lyricData.data) {
+                        track.lrc = lyricData.data.lrc;
+                    }
+                } catch (e) { console.warn("Netease lyric fetch failed", e); }
+            } else if (track.source === 'kuwo') {
+                let songId = track.songId || (track.id.includes('-') ? track.id.split('-')[1] : track.id);
+                try {
+                    const kuwoApi = `https://kw-api.cenguigui.cn/?id=${songId}&type=song&level=zp&format=json`;
+                    const res = await fetch(kuwoApi);
+                    const j = await res.json();
+                    if (j && j.code === 200 && j.data) {
+                        track.url = j.data.url || track.url;
+                        track.lrc = j.data.lyric || track.lrc;
+                        track.cover = j.data.pic || track.cover;
+                        track.album = j.data.album || track.album;
+                    }
+                } catch (e) { console.warn("Kuwo detail fetch failed", e); }
+            }
+
+            // 2. Meting Fallback for URL or missing data
+            if (!track.url || track.url.includes('meting')) {
+                let songId = track.songId || (track.id.includes('-') ? track.id.split('-')[1] : track.id);
+                let server = track.source === 'qq' ? 'tencent' : track.source;
+
+                const tryMeting = async (baseUrl) => {
+                    try {
+                        const res = await fetch(`${baseUrl}?type=song&id=${songId}&server=${server}`);
+                        const data = await res.json();
+                        return data && data[0] ? data[0] : null;
+                    } catch (e) { return null; }
+                };
+
+                // Prioritize qijieya for Netease as it proved better for full versions
+                let providers = [
+                    'https://api.qijieya.cn/meting/',
+                    'https://api.injahow.cn/meting/',
+                    'https://api.wuenci.com/meting/api/'
+                ];
+
+                // If it's not netease, maybe keep the original order or just try all
+                if (track.source !== 'netease') {
+                    providers = [
+                        'https://api.injahow.cn/meting/',
+                        'https://api.qijieya.cn/meting/',
+                        'https://api.wuenci.com/meting/api/'
+                    ];
+                }
+
+                let data = null;
+                for (const baseUrl of providers) {
+                    data = await tryMeting(baseUrl);
+                    // Minimal check: if netease and url has 'mobi' or looks like a 30s preview (very rare to detect easily without more API info)
+                    // But if we got a link, we check if it's usable.
+                    if (data && data.url) break;
+                }
+
+                if (data) {
+                    track.url = data.url || track.url;
+                    track.cover = data.pic || track.cover;
+                    if (!track.lrc || track.lrc.includes('meting') || track.lrc.startsWith('http')) {
+                        track.lrc = data.lrc || track.lrc;
+                    }
                 }
             }
-
-            // General Meting ID Fetch (for imported songs that lack URL)
-            // If ID starts with 'netease-', 'tencent-', etc., we need to resolve it
-            if (!track.url && track.id && (track.id.includes('-') || track.source)) {
-                 const parts = track.id.split('-');
-                 const realId = parts.length > 1 ? parts[1] : track.id;
-                 const source = parts.length > 1 ? parts[0] : track.source;
-                 
-                 // Map source to Meting
-                 const serverMap = { 'netease': 'netease', 'qq': 'tencent', 'tencent': 'tencent', 'migu': 'migu', 'kuwo': 'kuwo' };
-                 const server = serverMap[source] || source;
-
-                 if (server) {
-                     const tryFetch = async (baseUrl) => {
-                         try {
-                             const res = await fetch(`${baseUrl}?type=song&id=${realId}&server=${server}`);
-                             const data = await res.json();
-                             return data && data[0] ? data[0] : null;
-                         } catch (e) { return null; }
-                     };
-                     
-                     let metingData = await tryFetch('https://api.injahow.cn/meting/');
-                     if (!metingData) metingData = await tryFetch('https://api.wuenci.com/meting/api/');
-                     
-                     if (metingData) {
-                         track.url = metingData.url;
-                         track.cover = metingData.pic || track.cover;
-                         track.lrc = metingData.lrc;
-                     }
-                 }
-            }
-
-            // Netease via Meting (Legacy check)
-            if (track.source === 'netease' && !track.url) {
-                const metingRes = await fetch(`${this.endpoints.meting}?type=song&id=${track.songId}`);
-                const metingData = await metingRes.json();
-                if (metingData && metingData[0]) {
-                    track.url = metingData[0].url;
-                    track.cover = metingData[0].pic || track.cover;
-                    track.lrc = metingData[0].lrc;
-                }
-            }
-            
-            // Check if LRC is a URL and fetch it
-            if (track.lrc && track.lrc.startsWith('http')) {
-                const lrcRes = await fetch(track.lrc);
-                track.lrc = await lrcRes.text();
-            }
-
-            // If still no URL for others, maybe try Meting fallback?
-            // (Not implemented to avoid cors/complexity, assuming searchCommon returns URL)
 
         } catch (e) {
-            console.error("Detail fetch failed", e);
+            console.error("Detail fetch error:", e);
         }
+
+        // 3. Final Content Guard: Resolve LRC URL to text
+        if (typeof track.lrc === 'string' && track.lrc.startsWith('http')) {
+            try {
+                const lrcRes = await fetch(track.lrc);
+                const lrcText = await lrcRes.text();
+                if (lrcText && (lrcText.includes('[') || lrcText.length > 20)) {
+                    track.lrc = lrcText;
+                }
+            } catch (e) {
+                console.warn("Failed to resolve lyric URL", e);
+            }
+        }
+
         return track;
     },
 
-    // Get User Playlists via Meting (Proxy by Frontend)
     async getUserPlaylists(source, uid) {
-        // Map source to Meting server code
-        const serverMap = {
-            'netease': 'netease',
-            'qq': 'tencent',
-            'migu': 'migu',
-            'kuwo': 'kuwo'
-        };
+        const serverMap = { 'netease': 'netease', 'qq': 'tencent', 'migu': 'migu', 'kuwo': 'kuwo' };
         const server = serverMap[source];
         if (!server) return [];
 
-        // Try primary API (injahow)
-        const tryFetch = async (baseUrl) => {
+        const tryUser = async (baseUrl) => {
             try {
-                const url = `${baseUrl}?type=user&id=${uid}&server=${server}`;
-                const res = await fetch(url);
-                if (!res.ok) throw new Error('API Error');
-                const data = await res.json();
-                return Array.isArray(data) ? data : null;
-            } catch (e) {
-                return null;
-            }
-        };
-
-        let data = await tryFetch('https://api.injahow.cn/meting/');
-        if (!data) data = await tryFetch('https://api.wuenci.com/meting/api/');
-        // Fallback to qijieya if others fail (though it often fails for user type)
-        if (!data) data = await tryFetch('https://api.qijieya.cn/meting/');
-
-        if (!data || data.length === 0) {
-            throw new Error('无法获取歌单，请检查ID或稍后重试');
-        }
-
-        // Limit to first 20 playlists to avoid too much data
-        const playlists = data.slice(0, 20);
-        
-        // Fetch songs for the first 3 playlists (Detail Sync)
-        // We do this in parallel but limit concurrency
-        for (let i = 0; i < Math.min(3, playlists.length); i++) {
-            const pl = playlists[i];
-            const songs = await this.getPlaylistSongs(server, pl.id);
-            pl.tracks = songs || [];
-        }
-
-        return playlists;
-    },
-
-    async getPlaylistSongs(server, playlistId) {
-        // Try same APIs
-        const tryFetch = async (baseUrl) => {
-            try {
-                const url = `${baseUrl}?type=playlist&id=${playlistId}&server=${server}`;
-                const res = await fetch(url);
+                const res = await fetch(`${baseUrl}?type=user&id=${uid}&server=${server}`);
                 const data = await res.json();
                 return Array.isArray(data) ? data : null;
             } catch (e) { return null; }
         };
 
-        let data = await tryFetch('https://api.injahow.cn/meting/');
-        if (!data) data = await tryFetch('https://api.wuenci.com/meting/api/');
-        
+        let data = await tryUser('https://api.injahow.cn/meting/');
+        if (!data) data = await tryUser('https://api.wuenci.com/meting/api/');
+        if (!data) data = await tryUser('https://api.qijieya.cn/meting/');
+
+        if (!data) throw new Error('无法获取歌单');
+        return data.slice(0, 20);
+    },
+
+    async getPlaylistSongs(server, playlistId) {
+        const tryPl = async (baseUrl) => {
+            try {
+                const res = await fetch(`${baseUrl}?type=playlist&id=${playlistId}&server=${server}`);
+                const data = await res.json();
+                return Array.isArray(data) ? data : null;
+            } catch (e) { return null; }
+        };
+
+        let data = await tryPl('https://api.injahow.cn/meting/');
+        if (!data) data = await tryPl('https://api.wuenci.com/meting/api/');
         if (data) {
-            // Map to our standard format
             return data.map(s => ({
-                id: `${server}-${s.id}`, // Note: server here is 'netease'/'tencent' etc.
+                id: `${server}-${s.id}`,
                 title: s.name,
                 artist: s.artist,
                 album: s.album,
@@ -246,8 +262,35 @@ const MusicAPI = {
                 source: server,
                 url: s.url,
                 lrc: s.lrc
-            })).slice(0, 50); // Limit 50 songs per playlist
+            })).slice(0, 50);
         }
         return [];
+    },
+
+    async getPlaylistInfo(server, playlistId) {
+        return null;
+    },
+
+    async fetchLrcText(lrcUrl) {
+        if (!lrcUrl || !lrcUrl.startsWith('http')) return lrcUrl;
+        const proxies = [
+            `https://corsproxy.io/?url=${encodeURIComponent(lrcUrl)}`,
+            `https://api.allorigins.win/raw?url=${encodeURIComponent(lrcUrl)}`
+        ];
+
+        for (const proxyUrl of proxies) {
+            try {
+                const lrcRes = await fetch(proxyUrl);
+                if (lrcRes.ok) {
+                    const text = await lrcRes.text();
+                    if (text && text.length > 20 && !text.trim().startsWith('<')) {
+                        return text;
+                    }
+                }
+            } catch (e) {
+                console.warn(`Lyric proxy failed: ${proxyUrl}`, e);
+            }
+        }
+        return lrcUrl; // Fallback to raw URL if all fail
     }
 };

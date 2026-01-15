@@ -5,9 +5,19 @@ document.addEventListener('DOMContentLoaded', async () => {
         return;
     }
     const currentUser = AuthService.currentUser;
-    
+
     // Init Data
     await DataService.init();
+
+    // 加载持久化的播放历史（限制100首）
+    try {
+        const history = await DataService.fetchHistory();
+        if (history && history.length > 0) {
+            player.historyStack = history.slice(0, 100);
+        }
+    } catch (e) {
+        console.error('Failed to load history:', e);
+    }
 
     // Init UI
     UI.init();
@@ -18,15 +28,18 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // State
     const state = {
-        currentView: 'search', 
-        activeSources: ['netease'], 
+        currentView: 'search',
+        activeSources: ['netease'],
         isMultiSource: false,
         globalKeyword: '',
-        globalPage: 1,
+        searchPage: 1,
+        hotPage: 1,
         globalResults: [],
         currentListData: [],
-        hotSongsCache: {} 
+        hotSongsCache: {}
     };
+
+    // ... (rest of DOM elements)
 
     // DOM Elements
     const searchContainer = document.getElementById('search-container');
@@ -42,14 +55,14 @@ document.addEventListener('DOMContentLoaded', async () => {
         let tags = JSON.parse(sessionStorage.getItem('hotTags') || '[]');
         if (tags.length === 0) {
             const pool = [
-                '林俊杰', '周杰伦', '薛之谦', '邓紫棋', '陈奕迅', 'Taylor Swift', 'Justin Bieber', 
+                '林俊杰', '周杰伦', '薛之谦', '邓紫棋', '陈奕迅', 'Taylor Swift', 'Justin Bieber',
                 '五月天', '李荣浩', '张杰', '王力宏', '蔡依林', '毛不易', '许嵩', '华晨宇',
                 '告白气球', '起风了', '演员', '年少有为', '光年之外', '稻香', '青花瓷'
             ];
             tags = pool.sort(() => 0.5 - Math.random()).slice(0, 4);
             sessionStorage.setItem('hotTags', JSON.stringify(tags));
         }
-        
+
         recContainer.innerHTML = '';
         tags.forEach(tag => {
             const span = document.createElement('span');
@@ -69,7 +82,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function switchView(viewName, data = null) {
         state.currentView = viewName;
-        
+
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
         const navItem = document.querySelector(`.nav-item[data-view="${viewName}"]`);
         if (navItem) navItem.classList.add('active');
@@ -87,7 +100,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             searchBtn.style.visibility = 'hidden';
             multiToggle.style.display = 'none';
             recContainer.style.display = 'none';
-            
+
             if (state.activeSources.length > 1) {
                 state.activeSources = [state.activeSources[0]];
                 updateSourceChips();
@@ -95,7 +108,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         } else {
             document.querySelector('.search-input-wrapper').style.visibility = 'visible';
             searchBtn.style.visibility = 'visible';
-            
+
             if (viewName === 'search') {
                 searchContainer.style.display = 'flex';
                 searchContainer.style.visibility = 'visible';
@@ -114,19 +127,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             searchInput.value = state.globalKeyword;
             searchInput.placeholder = '搜索歌曲、歌手...';
             if (state.globalResults.length > 0) {
-                UI.renderSongList(state.globalResults, state.globalPage, 50, (page) => {
-                    state.globalPage = page;
+                UI.renderSongList(state.globalResults, state.searchPage, 50, (page) => {
+                    state.searchPage = page;
                     doGlobalSearch();
-                });
+                }, false, 'search');
             } else if (state.globalKeyword) {
                 doGlobalSearch();
             } else {
                 UI.renderEmptyState();
             }
-        } 
+        }
         else if (viewName === 'hot') {
-            state.globalPage = 1;
-            loadHotSongs(state.activeSources[0], 1);
+            loadHotSongs(state.activeSources[0], state.hotPage);
         }
         else if (viewName === 'favorites') {
             searchInput.value = '';
@@ -134,7 +146,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Use DataService
             const favs = DataService.favorites;
             state.currentListData = favs;
-            UI.renderSongList(favs, 1, 1, null, true);
+            UI.renderSongList(favs, 1, 1, null, true, 'favorites');
         }
         else if (viewName === 'history') {
             searchInput.value = '';
@@ -142,7 +154,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             const history = player.historyStack.slice().reverse();
             state.currentListData = history;
             if (history.length > 0) {
-                UI.renderSongList(history, 1, 1, null, true);
+                UI.renderSongList(history, 1, 1, null, true, 'history');
             } else {
                 UI.renderEmptyState('暂无播放历史');
             }
@@ -153,7 +165,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             // data is the playlist object
             if (data && data.tracks) {
                 state.currentListData = data.tracks;
-                UI.renderSongList(data.tracks, 1, 1, null, true);
+                state.currentPlaylistId = data.id;
+                UI.renderSongList(data.tracks, 1, 1, null, true, 'playlist', data.id);
             } else {
                 UI.renderEmptyState('歌单为空');
             }
@@ -161,30 +174,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function loadHotSongs(source, page = 1) {
+        state.hotPage = page;
         if (page === 1 && state.hotSongsCache[source] && state.hotSongsCache[source].length > 0) {
             UI.renderSongList(state.hotSongsCache[source], page, 50, (newPage) => {
-                state.globalPage = newPage;
                 loadHotSongs(source, newPage);
-            });
+            }, false, 'hot');
             return;
         }
 
         UI.showLoading();
         try {
             let keyword = '热歌榜';
-            if (source === 'migu') keyword = '周杰伦'; 
-            if (source === 'qq') keyword = '热歌';     
-            
+            if (source === 'migu') keyword = '周杰伦';
+            if (source === 'qq') keyword = '热歌';
+
             const res = await MusicAPI.search(keyword, source, page, 20);
-            
+
             if (res.length > 0) {
                 if (page === 1) {
                     state.hotSongsCache[source] = res;
                 }
                 UI.renderSongList(res, page, 50, (newPage) => {
-                    state.globalPage = newPage;
                     loadHotSongs(source, newPage);
-                });
+                }, false, 'hot');
             } else {
                 UI.renderEmptyState('暂无热门歌曲');
             }
@@ -201,7 +213,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (state.currentView === 'search') {
             if (val) {
                 state.globalKeyword = val;
-                state.globalPage = 1;
+                state.searchPage = 1;
                 doGlobalSearch();
             }
         } else {
@@ -212,14 +224,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function doGlobalSearch() {
         UI.showLoading();
         try {
-            const promises = state.activeSources.map(source => 
-                MusicAPI.search(state.globalKeyword, source, state.globalPage)
+            const promises = state.activeSources.map(source =>
+                MusicAPI.search(state.globalKeyword, source, state.searchPage)
                     .catch(e => [])
             );
             const results = await Promise.all(promises);
             let merged = [];
             if (state.isMultiSource) {
                 const maxLength = Math.max(...results.map(r => r.length));
+                // Interleave results from all active sources
                 for (let i = 0; i < maxLength; i++) {
                     for (let j = 0; j < results.length; j++) {
                         if (results[j][i]) merged.push(results[j][i]);
@@ -228,15 +241,16 @@ document.addEventListener('DOMContentLoaded', async () => {
             } else {
                 merged = results[0] || [];
             }
+            state.currentListData = merged;
             state.globalResults = merged;
             if (merged.length === 0) {
                 UI.renderEmptyState('没有找到相关歌曲');
                 return;
             }
-            UI.renderSongList(merged, state.globalPage, 50, (page) => {
-                state.globalPage = page;
+            UI.renderSongList(merged, state.searchPage, 50, (page) => {
+                state.searchPage = page;
                 doGlobalSearch();
-            });
+            }, false, 'search');
         } catch (e) {
             UI.renderEmptyState('搜索出错，请重试');
         }
@@ -245,15 +259,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     function doLocalFilter(keyword) {
         if (!state.currentListData) return;
         if (!keyword) {
-            UI.renderSongList(state.currentListData, 1, 1, null, true);
+            const viewType = state.currentView === 'favorites' ? 'favorites' :
+                state.currentView === 'playlist' ? 'playlist' : 'search';
+            const plId = state.currentView === 'playlist' ? state.currentPlaylistId : null;
+            UI.renderSongList(state.currentListData, 1, 1, null, true, viewType, plId);
             return;
         }
         const lower = keyword.toLowerCase();
-        const filtered = state.currentListData.filter(item => 
+        const filtered = state.currentListData.filter(item =>
             (item.title && item.title.toLowerCase().includes(lower)) ||
             (item.artist && item.artist.toLowerCase().includes(lower))
         );
-        UI.renderSongList(filtered, 1, 1, null, true);
+        const viewType = state.currentView === 'favorites' ? 'favorites' :
+            state.currentView === 'playlist' ? 'playlist' : 'search';
+        const plId = state.currentView === 'playlist' ? state.currentPlaylistId : null;
+        UI.renderSongList(filtered, 1, 1, null, true, viewType, plId);
     }
 
     searchInput.addEventListener('input', (e) => {
@@ -265,41 +285,91 @@ document.addEventListener('DOMContentLoaded', async () => {
     searchBtn.addEventListener('click', triggerSearch);
 
     // --- Source Logic ---
+    function getSourceDisplayName(src) {
+        switch (src) {
+            case 'netease': return '网易云音乐';
+            case 'qq': return 'QQ音乐';
+            case 'migu': return '咪咕音乐';
+            case 'kuwo': return '酷我音乐';
+            default: return src;
+        }
+    }
+
     multiToggle.addEventListener('click', () => {
         state.isMultiSource = !state.isMultiSource;
         multiToggle.classList.toggle('active', state.isMultiSource);
+
+        // Auto pause on mode toggle
+        if (window.player && typeof window.player.pause === 'function') {
+            window.player.pause();
+        }
+
         if (!state.isMultiSource && state.activeSources.length > 1) {
+            // Revert to first active source when turning off multi-source
             state.activeSources = [state.activeSources[0]];
-            updateSourceChips();
-            if (state.currentView === 'search' && state.globalKeyword) {
-                state.globalPage = 1;
-                doGlobalSearch();
-            }
+        }
+
+        const names = state.activeSources.map(s => getSourceDisplayName(s)).join(' 和 ');
+        UI.showToast(`已为您切换至 ${names}，播放已暂停`, 'info');
+
+        updateSourceChips();
+        if (state.currentView === 'search' && state.globalKeyword) {
+            state.searchPage = 1;
+            doGlobalSearch();
         }
     });
 
     sourceChips.forEach(chip => {
         chip.addEventListener('click', () => {
             const source = chip.dataset.source;
+
+            // HOT view is always single source
             if (state.currentView === 'hot') {
+                if (window.player && typeof window.player.pause === 'function') {
+                    window.player.pause();
+                }
                 state.activeSources = [source];
-                state.globalPage = 1;
+                state.hotPage = 1;
                 updateSourceChips();
                 loadHotSongs(source, 1);
+                UI.showToast(`已切换至 ${getSourceDisplayName(source)} 热歌榜`, 'info');
                 return;
             }
+
             if (state.isMultiSource) {
+                // Multi-source Toggle Logic
                 if (state.activeSources.includes(source)) {
-                    if (state.activeSources.length > 1) state.activeSources = state.activeSources.filter(s => s !== source);
+                    if (state.activeSources.length > 1) {
+                        state.activeSources = state.activeSources.filter(s => s !== source);
+                    } else {
+                        UI.showToast('请至少保留一个音源', 'warning');
+                        return;
+                    }
                 } else {
                     state.activeSources.push(source);
                 }
+
+                if (window.player && typeof window.player.pause === 'function') {
+                    window.player.pause();
+                }
+
+                const names = state.activeSources.map(s => getSourceDisplayName(s)).join(' 和 ');
+                UI.showToast(`已为您切换至 ${names}，播放已暂停`, 'info');
             } else {
-                if (state.activeSources[0] !== source) state.activeSources = [source];
+                // Single source Logic
+                if (state.activeSources.length === 1 && state.activeSources[0] === source) return;
+
+                if (window.player && typeof window.player.pause === 'function') {
+                    window.player.pause();
+                }
+
+                state.activeSources = [source];
+                UI.showToast(`已为您切换至 ${getSourceDisplayName(source)}，播放已暂停`, 'info');
             }
+
             updateSourceChips();
             if (state.currentView === 'search' && state.globalKeyword) {
-                state.globalPage = 1;
+                state.searchPage = 1;
                 doGlobalSearch();
             }
         });
@@ -321,9 +391,9 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Use DataService
         await DataService.fetchPlaylists();
         const playlists = DataService.playlists;
-        
+
         plSection.innerHTML = '';
-        
+
         // Group by type (Local vs Synced)
         // const localPls = playlists.filter(p => !p.is_sync);
         // const syncedPls = playlists.filter(p => p.is_sync);
@@ -337,7 +407,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
         // 2. Synced Playlists (Removed Grouping)
         // if (syncedPls.length > 0) { ... }
-        
+
         if (playlists.length === 0) {
             plSection.innerHTML = '<div style="padding:10px 30px;color:#999;font-size:12px;">暂无歌单</div>';
         }
@@ -355,18 +425,18 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
             <i class="fas fa-trash-alt nav-action-icon del-btn" style="font-size:12px;opacity:0;transition:opacity 0.2s;" title="删除"></i>
         `;
-        
+
         // Always enable delete/context menu for all playlists
         // if (!pl.is_sync) { ... } -> Removed condition
-        
+
         div.onmouseenter = () => div.querySelector('.del-btn').style.opacity = '1';
         div.onmouseleave = () => div.querySelector('.del-btn').style.opacity = '0';
         div.querySelector('.del-btn').addEventListener('click', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            UI.showDialog({ 
-                title: '删除歌单', 
-                content: `确定删除歌单 "${pl.name}" 吗？`, 
+            UI.showDialog({
+                title: '删除歌单',
+                content: `确定删除歌单 "${pl.name}" 吗？`,
                 onConfirm: async () => {
                     try {
                         await DataService.deletePlaylist(pl.id);
@@ -378,7 +448,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                     } catch (err) {
                         UI.showToast('删除失败', 'error');
                     }
-                } 
+                }
             });
         });
 
@@ -386,7 +456,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         div.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             e.stopPropagation();
-            UI.showPlaylistContextMenu(e.clientX, e.clientY, pl, 
+            UI.showPlaylistContextMenu(e.clientX, e.clientY, pl,
                 async (id) => {
                     try {
                         await DataService.deletePlaylist(id);
@@ -408,18 +478,18 @@ document.addEventListener('DOMContentLoaded', async () => {
         div.addEventListener('click', async () => {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             div.classList.add('active');
-            
+
             // Force refresh data from server to ensure latest songs
             await DataService.fetchPlaylists();
             const freshPl = DataService.playlists.find(p => p.id === pl.id);
-            
+
             if (freshPl) {
                 switchView('playlist', freshPl);
             } else {
                 switchView('playlist', pl);
             }
         });
-        
+
         return div;
     }
 
@@ -457,7 +527,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelectorAll('.nav-item[data-view]').forEach(item => {
         item.addEventListener('click', () => switchView(item.dataset.view));
     });
-    
+
     renderSidebarPlaylists();
     switchView('search');
 
@@ -465,7 +535,21 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Avatar Menu
     const userProfile = document.querySelector('.user-profile');
     const avatarInput = document.getElementById('avatar-input');
-    
+
+    // Help Modal
+    const helpBtn = document.getElementById('help-btn');
+    if (helpBtn) {
+        helpBtn.addEventListener('click', () => {
+            UI.showModal('help-modal');
+        });
+    }
+    document.getElementById('close-help').addEventListener('click', () => {
+        UI.closeModal('help-modal');
+    });
+    document.getElementById('help-ok-btn').addEventListener('click', () => {
+        UI.closeModal('help-modal');
+    });
+
     // Edit Profile Logic
     document.getElementById('edit-profile-btn').addEventListener('click', (e) => {
         e.stopPropagation();
@@ -487,7 +571,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     avatarInput.addEventListener('change', (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        
+
         const reader = new FileReader();
         reader.onload = async (ev) => {
             const base64 = ev.target.result;
@@ -500,39 +584,29 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.getElementById('save-profile-btn').addEventListener('click', async () => {
-        const newName = document.getElementById('edit-nickname').value.trim();
+        const avatarInput = document.getElementById('avatar-input');
         const newAvatar = avatarInput.dataset.temp || currentUser.avatar;
 
-        if (!newName) {
-            UI.showToast('昵称不能为空', 'error');
-            return;
-        }
-
         try {
-            // Update Profile API (need to update worker to accept nickname if needed, for now just avatar)
-            // Assuming we update avatar only as per previous worker code, but let's send both if supported
-            // Current worker only supports avatar update. We might need to update worker for nickname too.
-            // For now, let's just update avatar and localStorage username
-            
-            if (avatarInput.dataset.temp) {
-                await fetch(`${API_BASE}/user/profile`, {
-                    method: 'POST',
-                    headers: { ...DataService.authHeader, 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ avatar: newAvatar })
-                });
-            }
-            
+            // Update Profile API (Avatar only now)
+            await fetch(`${API_BASE}/user/profile`, {
+                method: 'POST',
+                headers: { ...DataService.authHeader(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    avatar: newAvatar
+                })
+            });
+
             // Update Local Cache
-            const updatedUser = { ...currentUser, username: newName, avatar: newAvatar };
+            const updatedUser = { ...currentUser, avatar: newAvatar };
             localStorage.setItem('currentUser', JSON.stringify(updatedUser));
-            
+
             // Update UI
-            document.getElementById('user-name').textContent = newName;
             document.getElementById('user-avatar').src = newAvatar;
-            
-            UI.showToast('资料已更新');
+
+            UI.showToast('头像已更新');
             UI.closeModal('profile-modal');
-            
+
             // Reload to reflect all changes safely
             setTimeout(() => location.reload(), 1000);
         } catch (err) {
@@ -578,7 +652,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <span>酷我音乐</span>
             </div>
         `;
-        
+
         // Bind events
         document.querySelectorAll('.qr-card').forEach(card => {
             card.addEventListener('click', () => {
@@ -611,10 +685,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     function showIdInput(platform) {
         qrPlatforms.style.display = 'none';
         qrDetail.style.display = 'block';
-        
+
         const names = { 'netease': '网易云音乐', 'qq': 'QQ音乐', 'migu': '咪咕音乐', 'kuwo': '酷我音乐' };
         const name = names[platform] || platform;
-        
+
         let hintHtml = '';
         if (platform === 'qq' || platform === 'migu') {
             hintHtml = `
@@ -626,7 +700,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 </div>
             `;
         }
-        
+
         // Inject Form (Updated for Link Import)
         qrDetail.innerHTML = `
             <div style="padding: 10px 20px;">
@@ -653,15 +727,15 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
             <button class="btn-text" id="back-to-select-dynamic" style="margin-top:5px;color:#666;background:none;border:none;cursor:pointer;">&lt; 返回选择平台</button>
         `;
-        
+
         document.getElementById('back-to-select-dynamic').onclick = resetSyncModal;
-        
+
         const btn = document.getElementById('start-sync-btn');
         const input = document.getElementById('sync-uid-input');
         const status = document.getElementById('sync-status');
-        
+
         input.focus();
-        
+
         // Helper: Parse Link
         const parseLink = (text, platform) => {
             let id = null;
@@ -687,11 +761,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const match = text.match(/playlist\/(\d+)/) || text.match(/id=(\d+)/);
                 if (match) return match[1];
             }
-            
+
             // Try generic number extraction if reasonable length (5-12 digits)
             const numMatch = text.match(/(\d{5,12})/);
             if (numMatch) return numMatch[1];
-            
+
             return text.trim(); // Fallback to raw input (maybe user entered ID directly)
         };
 
@@ -702,19 +776,19 @@ document.addEventListener('DOMContentLoaded', async () => {
                 status.style.color = '#ff5252';
                 return;
             }
-            
+
             const uid = parseLink(val, platform);
             if (!uid || uid.length < 4) {
-                 status.textContent = '无法识别链接中的ID，请重试';
-                 status.style.color = '#ff5252';
-                 return;
+                status.textContent = '无法识别链接中的ID，请重试';
+                status.style.color = '#ff5252';
+                return;
             }
 
             btn.disabled = true;
             btn.textContent = '正在获取歌单...';
             status.textContent = `正在连接 ${name} 服务...`;
             status.style.color = '#666';
-            
+
             try {
                 // 1. Fetch Details (New method to get SINGLE playlist)
                 // We need to use MusicAPI.getPlaylistSongs directly as we are importing a specific playlist, NOT user playlists
@@ -722,27 +796,61 @@ document.addEventListener('DOMContentLoaded', async () => {
                 // MusicAPI.getPlaylistSongs returns array of songs. We also need the playlist name.
                 // We might need to fake the name or fetch it.
                 // For simplicity, let's fetch songs. If we can't get name, use "Platform: ID".
-                
+
                 let songs = await MusicAPI.getPlaylistSongs(platform === 'qq' ? 'tencent' : platform, uid);
-                
+
                 if (!songs || songs.length === 0) {
-                     // Try User Playlist Sync fallback if the link was actually a User ID? 
-                     // No, user specifically said "Import Playlist via Link".
-                     throw new Error('未找到歌单或歌单为空');
+                    throw new Error('未找到歌单或歌单为空');
                 }
 
-                // We need a name. Let's try to get it from the first song or just generic.
-                // Or better, MusicAPI should support getPlaylistDetail?
-                // Currently it returns just songs.
-                // We'll use a generic name "导入: [ID]" or let user rename later.
-                const plName = uid;
-                
+                // 歌单命名：尝试获取真实歌单名称
+                const prefixMap = {
+                    'netease': '网易',
+                    'qq': 'QQ',
+                    'tencent': 'QQ',
+                    'kuwo': '酷我',
+                    'migu': '咪咕'
+                };
+                const prefix = prefixMap[platform] || platform;
+
+                // 尝试获取歌单真实名称
+                let realName = null;
+                try {
+                    const info = await MusicAPI.getPlaylistInfo(platform === 'qq' ? 'tencent' : platform, uid);
+                    if (info && info.name) {
+                        realName = info.name;
+                    }
+                } catch (e) {
+                    console.log('Failed to get playlist name, using ID');
+                }
+
+                const platformNamesShort = {
+                    'netease': '网易',
+                    'qq': 'QQ',
+                    'tencent': 'QQ',
+                    'kuwo': '酷我',
+                    'migu': '咪咕'
+                };
+                const pfSuffix = platformNamesShort[platform] || platform;
+
+                // 2. Prep restricted payload (only title and artist)
+                const finalPlName = realName || `导入歌单_${uid}`;
                 const payload = [{
                     id: uid,
-                    name: plName,
-                    tracks: songs
+                    name: finalPlName,
+                    tracks: songs.map(s => ({
+                        id: s.id, // Keep ID for uniqueness in frontend if needed
+                        title: `${s.title} (${pfSuffix})`,
+                        artist: s.artist,
+                        source: platform === 'tencent' ? 'qq' : platform,
+                        isImported: true, // Mark for on-demand search
+                        album: '',
+                        cover: '',
+                        url: '',
+                        lrc: ''
+                    }))
                 }];
-                
+
                 status.textContent = `获取到 ${songs.length} 首歌曲，正在保存...`;
                 btn.textContent = '正在保存...';
 
@@ -753,11 +861,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                     status.textContent = `导入成功！`;
                     status.style.color = '#1ecf9f';
                     UI.showToast(`导入成功！保留了您的本地修改`, 'success');
-                    
+
                     setTimeout(async () => {
                         UI.closeModal('qr-sync-modal');
-                        await DataService.fetchPlaylists(); 
-                        renderSidebarPlaylists(); 
+                        await DataService.fetchPlaylists();
+                        renderSidebarPlaylists();
                     }, 1500);
                 } else {
                     throw new Error(res.message || '保存失败');
@@ -772,34 +880,42 @@ document.addEventListener('DOMContentLoaded', async () => {
                 console.error(e);
             }
         };
-        
+
         input.onkeydown = (e) => {
             if (e.key === 'Enter') btn.click();
         };
     }
 
-    // Init on load
-    initSyncPlatforms();
-    
     // Remove old listeners references if any (cleaned up by replacement)
-    
+
     // Listen for playlist updates (from UI add action)
     document.addEventListener('playlist-updated', async (e) => {
         const plId = e.detail.id;
         // 1. Always re-fetch playlists to get latest tracks
-        await DataService.fetchPlaylists(); 
-        
+        await DataService.fetchPlaylists();
+
         // 2. If we are currently viewing ANY playlist, check if it's the modified one
         if (state.currentView === 'playlist') {
             const pl = DataService.playlists.find(p => p.id === plId);
-            const activeNav = document.querySelector('.pl-nav-item.active');
-            
-            // Re-render if the modified playlist matches the currently active nav item
-            if (pl && activeNav && activeNav.textContent.includes(pl.name)) {
-                 // Update state data directly
-                 state.currentListData = pl.tracks;
-                 // Re-render list immediately
-                 UI.renderSongList(pl.tracks, 1, 1, null, true);
+
+            // Re-render if the modified playlist matches the current one
+            if (pl && state.currentPlaylistId === plId) {
+                state.currentListData = pl.tracks;
+                UI.renderSongList(pl.tracks, 1, 1, null, true, 'playlist', pl.id);
+            }
+        }
+    });
+
+    // 监听收藏更新事件（从收藏页面取消收藏时刷新列表）
+    document.addEventListener('favorites-updated', async () => {
+        if (state.currentView === 'favorites') {
+            await DataService.fetchFavorites();
+            const favs = DataService.favorites;
+            state.currentListData = favs;
+            if (favs.length > 0) {
+                UI.renderSongList(favs, 1, 1, null, true, 'favorites');
+            } else {
+                UI.renderEmptyState('暂无收藏的歌曲');
             }
         }
     });
