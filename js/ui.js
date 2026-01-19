@@ -43,6 +43,163 @@ const UI = {
         this.bindPlayerEvents();
         this.bindDialogEvents();
         this.initSidebarResizer();
+        this.bindGlobalClickEvents();
+        this.createBatchBar();
+        this.selectedSongs = new Set();
+        this.isSelectionMode = true;
+
+        this.bindSelectionMode();
+        this.bindEffectDropdown();
+
+        // Sync Playlist Binding
+        const syncBtn = document.getElementById('sync-pl-btn');
+        if (syncBtn) {
+            syncBtn.addEventListener('click', () => {
+                this.showSyncDialog();
+            });
+        }
+    },
+
+    showSyncDialog() {
+        const container = document.createElement('div');
+        container.style.padding = '10px 0';
+
+        const tip = document.createElement('p');
+        tip.style.fontSize = '12px';
+        tip.style.color = '#888';
+        tip.style.marginBottom = '15px';
+        tip.textContent = '支持网易云、QQ音乐歌单分享链接（建议使用浏览器打开歌单后复制地址）。';
+
+        const platformWrap = document.createElement('div');
+        platformWrap.style.display = 'flex';
+        platformWrap.style.gap = '10px';
+        platformWrap.style.marginBottom = '15px';
+
+        let selectedPlatform = 'netease';
+        const createPlatBtn = (id, label) => {
+            const btn = document.createElement('div');
+            btn.className = 'dialog-btn';
+            btn.style.flex = '1';
+            btn.style.textAlign = 'center';
+            btn.style.padding = '8px';
+            btn.style.borderRadius = '6px';
+            btn.style.border = '1px solid #ddd';
+            btn.style.fontSize = '14px';
+            btn.style.cursor = 'pointer';
+            btn.textContent = label;
+
+            const updateStyles = () => {
+                if (selectedPlatform === id) {
+                    btn.style.background = 'var(--primary-color)';
+                    btn.style.color = 'white';
+                    btn.style.borderColor = 'var(--primary-color)';
+                } else {
+                    btn.style.background = 'none';
+                    btn.style.color = 'var(--text-main)';
+                    btn.style.borderColor = '#ddd';
+                }
+            };
+            btn.onclick = () => {
+                selectedPlatform = id;
+                platformWrap.childNodes.forEach(c => c.updateStyles());
+            };
+            btn.updateStyles = updateStyles;
+            updateStyles();
+            return btn;
+        };
+
+        platformWrap.appendChild(createPlatBtn('netease', '网易云音乐'));
+        platformWrap.appendChild(createPlatBtn('qq', 'QQ音乐'));
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.placeholder = '粘贴歌单链接，如 https://music.163.com/playlist?id=...';
+        input.style.width = '100%';
+        input.style.padding = '12px';
+        input.style.borderRadius = '8px';
+        input.style.border = '1px solid #ddd';
+        input.style.fontSize = '14px';
+
+        container.appendChild(tip);
+        container.appendChild(platformWrap);
+        container.appendChild(input);
+
+        this.showDialog({
+            title: '同步平台歌单',
+            content: container,
+            onConfirm: async (setLoading) => {
+                const url = input.value.trim();
+                if (!url) {
+                    this.showToast('请输入歌单链接', 'warning');
+                    return;
+                }
+                setLoading(true);
+                const success = await DataService.syncPlatform(selectedPlatform, url);
+                setLoading(false);
+                if (success) {
+                    this.uniDialog.classList.remove('show');
+                    // Refresh sidebar
+                    document.dispatchEvent(new CustomEvent('playlists-updated'));
+                }
+            }
+        });
+    },
+
+    bindSelectionMode() {
+        // Mode toggle removed as checkboxes are now always visible
+    },
+
+    bindEffectDropdown() {
+        const btn = document.getElementById('effect-btn');
+        const menu = document.getElementById('effect-menu');
+        if (!btn || !menu) return;
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            menu.classList.toggle('show');
+        });
+
+        menu.querySelectorAll('.effect-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const mode = item.dataset.mode;
+                if (window.player) {
+                    try {
+                        window.player.setAudioEffect(mode);
+                        btn.textContent = item.textContent;
+                        this.showToast(`音效已切换为: ${item.textContent}`, 'success');
+                    } catch (err) {
+                        this.showToast(`音效设置失败，回滚为原声`, 'error');
+                        window.player.setAudioEffect('original');
+                        btn.textContent = '原声';
+                        // Update active state in menu
+                        menu.querySelectorAll('.effect-item').forEach(i => i.classList.remove('active'));
+                        menu.querySelector('[data-mode="original"]').classList.add('active');
+                    }
+                    menu.classList.remove('show');
+                    menu.querySelectorAll('.effect-item').forEach(i => i.classList.remove('active'));
+                    item.classList.add('active');
+                }
+            });
+        });
+
+        document.addEventListener('click', () => {
+            menu.classList.remove('show');
+        });
+    },
+
+    bindGlobalClickEvents() {
+        document.addEventListener('click', (e) => {
+            const songMenu = document.getElementById('song-ctx-menu');
+            const plMenu = document.getElementById('pl-ctx-menu');
+            if (songMenu && songMenu.style.display === 'block' && !e.target.closest('#song-ctx-menu') && !e.target.closest('.more-btn')) {
+                songMenu.style.display = 'none';
+            }
+            if (plMenu && plMenu.style.display === 'block' && !e.target.closest('#pl-ctx-menu') && !e.target.closest('.pl-nav-item')) {
+                plMenu.style.display = 'none';
+            }
+        });
     },
 
     initSidebarResizer() {
@@ -52,11 +209,13 @@ const UI = {
         const overlay = document.getElementById('player-overlay');
         let isResizing = false;
 
-        resizer.addEventListener('mousedown', (e) => {
-            isResizing = true;
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
-        });
+        if (resizer) {
+            resizer.addEventListener('mousedown', (e) => {
+                isResizing = true;
+                document.body.style.cursor = 'col-resize';
+                document.body.style.userSelect = 'none';
+            });
+        }
 
         document.addEventListener('mousemove', (e) => {
             if (!isResizing) return;
@@ -104,11 +263,13 @@ const UI = {
             }
             return (x / rect.width);
         };
-        this.progressTrack.addEventListener('mousedown', (e) => {
-            isDragging = true;
-            const ratio = updateDrag(e);
-            if (player.audio.duration) player.audio.currentTime = ratio * player.audio.duration;
-        });
+        if (this.progressTrack) {
+            this.progressTrack.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                const ratio = updateDrag(e);
+                if (player.audio.duration) player.audio.currentTime = ratio * player.audio.duration;
+            });
+        }
         document.addEventListener('mousemove', (e) => { if (isDragging) updateDrag(e); });
         document.addEventListener('mouseup', (e) => {
             if (isDragging) {
@@ -122,10 +283,15 @@ const UI = {
             if (this.overlay.classList.contains('active')) this.overlay.classList.remove('active');
             else this.overlay.classList.add('active');
         };
-        document.getElementById('cover-wrapper').addEventListener('click', toggleOverlay);
-        document.getElementById('player-info-area').addEventListener('click', toggleOverlay);
-        document.getElementById('overlay-close').addEventListener('click', toggleOverlay);
-        document.getElementById('overlay-cover').addEventListener('click', toggleOverlay);
+        const wrapper = document.getElementById('cover-wrapper');
+        const info = document.getElementById('player-info-area');
+        const close = document.getElementById('overlay-close');
+        const overlayCover = document.getElementById('overlay-cover');
+
+        if (wrapper) wrapper.addEventListener('click', toggleOverlay);
+        if (info) info.addEventListener('click', toggleOverlay);
+        if (close) close.addEventListener('click', toggleOverlay);
+        if (overlayCover) overlayCover.addEventListener('click', toggleOverlay);
 
         if (this.downloadBtn) {
             this.downloadBtn.onclick = () => {
@@ -197,12 +363,170 @@ const UI = {
         if (modal) modal.classList.remove('show');
     },
 
+    createBatchBar() {
+        const div = document.createElement('div');
+        div.className = 'batch-bar';
+        div.innerHTML = `
+            <span>已选择 <span class="batch-count">0</span> 首</span>
+            <div class="batch-btn" id="batch-add-pl">
+                <i class="fas fa-plus"></i> 添加到歌单
+            </div>
+            <div class="batch-btn" id="batch-add-fav">
+                <i class="fas fa-heart"></i> 收藏到我的
+            </div>
+            <div class="batch-btn" id="batch-play-next">
+                <i class="fas fa-list"></i> 下一首播放
+            </div>
+            <div class="batch-btn" style="color:#ff5252;border-color:#ff5252" id="batch-clear">
+                <i class="fas fa-times"></i> 取消选择
+            </div>
+        `;
+        document.body.appendChild(div);
+
+        document.getElementById('batch-add-pl').onclick = () => {
+            if (this.selectedSongs.size === 0) return;
+            this.showBatchPlaylistSelect([...this.selectedSongs]);
+        };
+
+        document.getElementById('batch-add-fav').onclick = () => {
+            if (this.selectedSongs.size === 0) return;
+            this.batchAddFavorites([...this.selectedSongs]);
+        };
+
+        document.getElementById('batch-play-next').onclick = () => {
+            const list = [...this.selectedSongs];
+            if (window.player) {
+                window.player.playlist.splice(window.player.currentIndex + 1, 0, ...list);
+                this.showToast(`已添加 ${list.length} 首歌曲到播放队列`);
+                this.selectedSongs.clear();
+                this.updateBatchBar();
+                // Re-render to clear checkboxes
+                if (this._lastRenderArgs) {
+                    // Hacky re-render if we stored args, or just clear checkboxes manually?
+                    // Let's just unchecked them DOM-wise
+                    document.querySelectorAll('.song-checkbox').forEach(c => c.checked = false);
+                    document.getElementById('select-all-checkbox').checked = false;
+                }
+            }
+        };
+
+        document.getElementById('batch-clear').onclick = () => {
+            this.selectedSongs.clear();
+            this.updateBatchBar();
+            document.querySelectorAll('.song-checkbox').forEach(c => c.checked = false);
+            const allCheck = document.getElementById('select-all-checkbox');
+            if (allCheck) allCheck.checked = false;
+        };
+
+        this.batchBar = div;
+    },
+
+    updateBatchBar() {
+        const count = this.selectedSongs.size;
+        this.batchBar.querySelector('.batch-count').textContent = count;
+        if (count > 0) this.batchBar.classList.add('show');
+        else this.batchBar.classList.remove('show');
+    },
+
+    async showBatchPlaylistSelect(songs) {
+        await DataService.fetchPlaylists();
+        const pls = DataService.playlists;
+
+        if (pls.length === 0) {
+            this.showToast('暂无创建的歌单', 'warning');
+            return;
+        }
+
+        const container = document.createElement('div');
+        container.className = 'pl-multi-select';
+
+        const list = document.createElement('div');
+        list.className = 'pl-select-list';
+        list.style.maxHeight = '300px';
+        list.style.overflowY = 'auto';
+
+        const selectedPls = new Set();
+
+        pls.forEach(pl => {
+            const item = document.createElement('div');
+            item.className = 'pl-select-item';
+            const count = pl.tracks ? pl.tracks.length : 0;
+            item.innerHTML = `
+                <input type="checkbox" class="pl-checkbox" data-id="${pl.id}">
+                <div class="pl-select-info">
+                    <span class="pl-select-name">${pl.name}</span>
+                    <span class="pl-select-count">${count}首</span>
+                </div>
+            `;
+            item.onclick = (e) => {
+                if (e.target.classList.contains('pl-checkbox')) return; // Prevent double-toggle if checkbox itself is clicked
+                const cb = item.querySelector('.pl-checkbox');
+                cb.checked = !cb.checked;
+                if (cb.checked) selectedPls.add(pl.id);
+                else selectedPls.delete(pl.id);
+            };
+            item.querySelector('.pl-checkbox').onclick = (e) => {
+                e.stopPropagation(); // Prevent item.onclick from firing
+                if (e.target.checked) selectedPls.add(pl.id);
+                else selectedPls.delete(pl.id);
+            };
+            list.appendChild(item);
+        });
+
+        container.appendChild(list);
+
+        this.showDialog({
+            title: songs.length === 1 ? `选择添加到的歌单` : `批量添加 ${songs.length} 首歌曲`,
+            content: container,
+            onConfirm: async (setLoading) => {
+                if (selectedPls.size === 0) {
+                    this.showToast('请选择目标歌单', 'warning');
+                    return;
+                }
+
+                setLoading(true);
+                const plIds = [...selectedPls];
+                let successCount = 0;
+
+                try {
+                    for (const plId of plIds) {
+                        await DataService.addBatchSongsToPlaylist(plId, songs);
+                        successCount++;
+                    }
+                    this.showToast(`成功添加至 ${plIds.length} 个歌单`, 'success');
+                    this.selectedSongs.clear();
+                    this.updateBatchBar();
+                    document.querySelectorAll('.song-checkbox').forEach(c => c.checked = false);
+                    const allCheck = document.getElementById('select-all-checkbox');
+                    if (allCheck) allCheck.checked = false;
+                    return true; // Close dialog
+                } catch (e) {
+                    this.showToast(`批量添加失败: ${e.message}`, 'error');
+                    return false; // Keep dialog open
+                } finally {
+                    setLoading(false);
+                }
+            },
+            showCancel: true
+        });
+    },
+
+    async showPlaylistSelect(song) {
+        this.showBatchPlaylistSelect([song]);
+    },
+
     // --- Dialog System ---
     bindDialogEvents() {
-        const hide = () => this.uniDialog.classList.remove('show');
+        const hide = () => {
+            if (this.isDialogLoading) return;
+            this.uniDialog.classList.remove('show');
+        };
         this.dialogClose.onclick = hide;
         this.dialogCancel.onclick = hide;
-        this.uniDialog.onclick = (e) => { if (e.target === this.uniDialog) hide(); };
+        this.uniDialog.onclick = (e) => {
+            if (this.isDialogLoading) return;
+            if (e.target === this.uniDialog) hide();
+        };
     },
 
     showDialog({ title, content, onConfirm, showCancel = true }) {
@@ -214,19 +538,63 @@ const UI = {
             this.dialogContent.appendChild(content);
         }
         this.dialogCancel.style.display = showCancel ? 'block' : 'none';
+        this.uniDialog.classList.remove('loading'); // Reset loading state
+
+        const setLoading = (loading) => {
+            this.isDialogLoading = loading;
+            if (loading) {
+                this.uniDialog.classList.add('loading');
+                this.dialogConfirm.disabled = true;
+                this.dialogCancel.disabled = true;
+                this.dialogConfirm.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 处理中...';
+            } else {
+                this.uniDialog.classList.remove('loading');
+                this.dialogConfirm.disabled = false;
+                this.dialogCancel.disabled = false;
+                this.dialogConfirm.textContent = '确认';
+            }
+        };
 
         // Always reset confirm button visibility
         if (onConfirm) {
             this.dialogConfirm.style.display = 'block';
-            this.dialogConfirm.onclick = () => {
-                if (onConfirm) onConfirm();
-                this.uniDialog.classList.remove('show');
+            this.dialogConfirm.onclick = async () => {
+                const shouldClose = await onConfirm(setLoading);
+                if (shouldClose !== false) {
+                    this.uniDialog.classList.remove('show');
+                }
             };
         } else {
             this.dialogConfirm.style.display = 'none';
         }
 
         this.uniDialog.classList.add('show');
+    },
+
+    batchAddFavorites(songs) {
+        this.showDialog({
+            title: `批量收藏`,
+            content: `确定要将选中的 ${songs.length} 首歌曲添加到我的收藏吗？`,
+            onConfirm: async (setLoading) => {
+                setLoading(true);
+                try {
+                    await DataService.addBatchFavorites(songs);
+                    this.showToast(`成功收藏 ${songs.length} 首歌曲`, 'success');
+                    this.selectedSongs.clear();
+                    this.updateBatchBar();
+                    document.querySelectorAll('.song-checkbox').forEach(c => c.checked = false);
+                    const allCheck = document.getElementById('select-all-checkbox');
+                    if (allCheck) allCheck.checked = false;
+                    return true;
+                } catch (e) {
+                    this.showToast(`批量收藏失败: ${e.message}`, 'error');
+                    return false;
+                } finally {
+                    setLoading(false);
+                }
+            },
+            showCancel: true
+        });
     },
 
     showInput({ title, placeholder, onConfirm }) {
@@ -242,76 +610,6 @@ const UI = {
             onConfirm: () => onConfirm(input.value.trim())
         });
         setTimeout(() => input.focus(), 100);
-    },
-
-    async showPlaylistSelect(song) {
-        // Force refresh playlists from DataService
-        await DataService.fetchPlaylists();
-        const pls = DataService.playlists; // Show ALL playlists
-
-        if (pls.length === 0) {
-            this.showDialog({
-                title: '添加到歌单',
-                content: '您还没有创建自建歌单，请先去侧边栏新建。',
-                showCancel: false
-            });
-            return;
-        }
-
-        const list = document.createElement('div');
-        list.className = 'pl-select-list';
-        pls.forEach(pl => {
-            const item = document.createElement('div');
-            item.className = 'pl-select-item';
-            const count = pl.tracks ? pl.tracks.length : 0;
-            item.innerHTML = `
-                <div style="display:flex;align-items:center;gap:10px;flex:1;">
-                    <i class="fas fa-list-ul"></i> 
-                    <span>${pl.name}</span>
-                </div>
-                <span style="font-size:12px;color:#999;">${count}首</span>
-            `;
-            // BIND CLICK EVENT DIRECTLY TO ITEM
-            item.addEventListener('click', async (e) => {
-                e.preventDefault();
-                e.stopPropagation(); // Stop propagation
-
-                // 1. Show loading state if needed, or just optimistic update
-                // Close Dialog FIRST
-                this.uniDialog.classList.remove('show');
-
-                // Show immediate feedback
-                this.showToast('正在添加到歌单...', 'success');
-
-                try {
-                    // 2. Call Service
-                    const success = await DataService.addSongToPlaylist(pl.id, song);
-
-                    if (success) {
-                        this.showToast(`已成功添加到: ${pl.name}`, 'success');
-                        // 3. Dispatch Global Event
-                        const event = new CustomEvent('playlist-updated', { detail: { id: pl.id } });
-                        document.dispatchEvent(event);
-                    } else {
-                        // Fallback if success is false but no error thrown (e.g. optimistic revert)
-                        this.showToast('添加失败：可能歌曲已存在', 'error');
-                    }
-                } catch (err) {
-                    console.error('Add to playlist UI error:', err);
-                    let msg = err.message || '未知错误';
-                    if (msg.includes('exists')) msg = '歌曲已存在于该歌单';
-                    this.showToast(`添加失败：${msg}`, 'error');
-                }
-            });
-            list.appendChild(item);
-        });
-
-        this.showDialog({
-            title: '添加到歌单',
-            content: list,
-            showCancel: true
-        });
-        this.dialogConfirm.style.display = 'none';
     },
 
     // --- List Rendering ---
@@ -335,14 +633,52 @@ const UI = {
 
     renderSongList(songs, currentPage, totalPages, onPageChange, isLocal = false, viewType = 'search', currentPlaylistId = null) {
         this.songListContainer.innerHTML = '';
+        this._lastRenderArgs = arguments;
+
         if (songs.length === 0) {
             this.renderEmptyState('没有找到相关歌曲');
             return;
         }
+
+        // Always enable selection mode class for layout
+        this.songListContainer.classList.add('selection-mode');
+
         const header = document.createElement('div');
         header.className = 'list-header';
-        header.innerHTML = `<div>#</div><div>标题</div><div>歌手</div><div>专辑</div><div>时长</div><div style="text-align: right">操作</div>`;
+        header.innerHTML = `
+            <div class="col-check"><input type="checkbox" id="select-all-checkbox"></div>
+            <div class="col-index">#</div><div>标题</div><div>歌手</div><div>专辑</div><div>时长</div><div style="text-align: right">操作</div>
+        `;
         this.songListContainer.appendChild(header);
+
+        // Select All Logic
+        const allCheck = header.querySelector('#select-all-checkbox');
+        // Check if all displayed songs are selected
+        const allSelected = songs.length > 0 && songs.every(s => this.selectedSongs.has(s)); // Note: Set stores object ref. 
+        // Important: object ref might change if re-fetched. IDs are safer.
+        // Let's use IDs for set.
+
+        // BETTER: Store IDs in selectedSongs Set.
+        // But we need Song Objects for "Add to Playlist".
+        // Let's map IDs back to objects from `songs` array for current view.
+        // Or store Objects in Set? Objects are easier if refs persist.
+        // Re-fetching might break refs. ID is safer.
+        // CHANGE: this.selectedSongs stores IDs (or UIDs).
+        // BUT for adding to playlist we need the object.
+        // Let's store objects. If refs change, selection is lost. That's acceptable for search results.
+
+        allCheck.checked = songs.every(s => this.selectedSongs.has(s)); // Simplified
+
+        allCheck.onclick = (e) => {
+            const checked = e.target.checked;
+            songs.forEach(s => {
+                if (checked) this.selectedSongs.add(s);
+                else this.selectedSongs.delete(s);
+            });
+            this.updateBatchBar();
+            // Update all row checkboxes
+            document.querySelectorAll('.song-checkbox').forEach(c => c.checked = checked);
+        };
 
         // 保存当前视图信息用于删除操作
         this._currentViewType = viewType;
@@ -354,7 +690,9 @@ const UI = {
 
             // Re-apply: Click to play
             div.onclick = (e) => {
-                // Prevent playing if clicking action buttons or if unplayable
+                // Prevent playing if clicking checkbox or action
+                if (e.target.closest('.col-check') || e.target.closest('input')) return;
+
                 if (e.target.closest('.btn-action') || e.target.closest('.col-actions')) return;
 
                 if (song.unplayable) {
@@ -363,12 +701,8 @@ const UI = {
                 }
 
                 if (window.player) {
-                    // Fix: Set playlist context so "Next" works
-                    // Find index in the original songs array
                     const idx = index;
                     window.player.setPlaylist(songs, idx);
-                } else {
-                    console.error('Player not initialized');
                 }
             };
 
@@ -381,14 +715,16 @@ const UI = {
                 div.classList.add('unplayable');
             }
 
-            // 使用 DataService 判断是否已收藏
             const isFav = DataService.isFavorite(song);
             const favClass = isFav ? 'fas fa-heart active' : 'far fa-heart';
-            // 仅歌单页面显示删除按钮，收藏页面不显示（取消收藏=删除）
             const showDeleteBtn = viewType === 'playlist';
+
+            const isSelected = this.selectedSongs.has(song);
+
             div.innerHTML = `
+                <div class="col-check"><input type="checkbox" class="song-checkbox" ${isSelected ? 'checked' : ''}></div>
                 <div class="col-index">${(currentPage - 1) * 20 + index + 1}</div>
-                <div class="col-title">${song.title} <span class="source-tag">${this.getSourceName(song.source)}</span></div>
+                <div class="col-title">${song.title} <span class="source-tag">${this.getSourceName(song.source)}</span>${song.is_local_add ? ' <span class="manual-tag">手动添加</span>' : ''}</div>
                 <div class="col-artist">${song.artist}</div>
                 <div class="col-album">${song.album || '-'}</div>
                 <div class="col-duration">${this.formatTime(song.duration)}</div>
@@ -399,6 +735,20 @@ const UI = {
                     <button class="btn-action del-song-btn" title="从歌单删除" style="color:#ff5252; display: ${showDeleteBtn ? 'flex' : 'none'}"><i class="fas fa-trash"></i></button>
                 </div>
             `;
+
+            // Checkbox Event
+            const ck = div.querySelector('.song-checkbox');
+            ck.onclick = (e) => {
+                e.stopPropagation();
+                if (ck.checked) this.selectedSongs.add(song);
+                else this.selectedSongs.delete(song);
+
+                this.updateBatchBar();
+                // Update header check
+                allCheck.checked = songs.every(s => this.selectedSongs.has(s));
+            };
+
+            // ... (rest of events)
 
             // ... (events)
 

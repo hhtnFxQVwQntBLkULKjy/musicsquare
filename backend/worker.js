@@ -522,12 +522,69 @@ export default {
                     tracks: songs.map(s => {
                         const song = JSON.parse(s.song_json);
                         song.uid = s.id; // Add uid from table ID
+                        song.is_local_add = !!s.is_local_add;
                         return song;
                     })
                 });
             }
 
             return json(playlists);
+        }
+
+        if (path === "/api/playlists/sync" && request.method === "POST") {
+            const userId = getUserId();
+            if (!userId) return error("Unauthorized", 401);
+            const { platform, externalId, name, songs } = await request.json();
+            if (!platform || !externalId || !Array.isArray(songs)) return error("Invalid data");
+
+            // 1. Check if playlist exists
+            let pl = await env.DB.prepare("SELECT * FROM playlists WHERE user_id = ? AND platform = ? AND external_id = ?").bind(userId, platform, externalId).first();
+            let playlistId;
+            if (!pl) {
+                const res = await env.DB.prepare("INSERT INTO playlists (user_id, name, is_sync, platform, external_id, created_at) VALUES (?, ?, 1, ?, ?, ?)")
+                    .bind(userId, (platform === 'netease' ? '网易:' : 'QQ:') + name, platform, externalId, Date.now()).run();
+                playlistId = res.meta.last_row_id;
+            } else {
+                playlistId = pl.id;
+                // Update name if changed (keep prefix)
+                const newPrefixedName = (platform === 'netease' ? '网易:' : 'QQ:') + name;
+                if (pl.name !== newPrefixedName) {
+                    await env.DB.prepare("UPDATE playlists SET name = ? WHERE id = ?").bind(newPrefixedName, playlistId).run();
+                }
+            }
+
+            // 2. Incremental Sync
+            const { results: dbSongs } = await env.DB.prepare("SELECT id, song_json, is_local_add FROM playlist_songs WHERE playlist_id = ?").bind(playlistId).all();
+            const dbMap = new Map();
+            dbSongs.forEach(s => {
+                const song = JSON.parse(s.song_json);
+                dbMap.set(song.id, s);
+            });
+
+            const platformIds = new Set(songs.map(s => s.id));
+            const batch = [];
+
+            // Add new songs from platform
+            for (const s of songs) {
+                if (!dbMap.has(s.id)) {
+                    delete s.url;
+                    if (typeof s.lrc === 'string' && s.lrc.startsWith('http')) delete s.lrc;
+                    batch.push(env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES (?, ?, 0, ?)").bind(playlistId, JSON.stringify(s), Date.now()));
+                }
+            }
+
+            // Delete removed platform songs (not manual ones)
+            for (const [id, dbSong] of dbMap.entries()) {
+                if (!platformIds.has(id) && dbSong.is_local_add === 0) {
+                    batch.push(env.DB.prepare("DELETE FROM playlist_songs WHERE id = ?").bind(dbSong.id));
+                }
+            }
+
+            if (batch.length > 0) {
+                await env.DB.batch(batch);
+            }
+
+            return json({ success: true, count: batch.length });
         }
 
         // 6. Playlists: Create/Delete/Update/Add Songs (Standard CRUD)
@@ -552,14 +609,51 @@ export default {
             const pl = await env.DB.prepare("SELECT * FROM playlists WHERE id = ?").bind(plId).first();
             if (!pl || pl.user_id !== userId) return error("Forbidden", 403);
 
+            // Strip sensitive/temporary fields
+            delete song.url;
+            if (typeof song.lrc === 'string' && song.lrc.startsWith('http')) delete song.lrc;
+
             // Check duplicate
-            // Note: song.id might be "netease-123", we store full object
             const exists = await env.DB.prepare("SELECT id FROM playlist_songs WHERE playlist_id = ? AND json_extract(song_json, '$.id') = ?").bind(plId, song.id).first();
             if (exists) return error("Song already exists in playlist");
 
             // INSERT with is_local_add = 1
             const res = await env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES (?, ?, 1, ?)").bind(plId, JSON.stringify(song), Date.now()).run();
             return json({ success: true, uid: res.meta.last_row_id });
+        }
+
+        // Batch Add Songs to Playlist
+        const batchAddSongsMatch = path.match(/^\/api\/playlists\/batch-songs$/);
+        if (batchAddSongsMatch && request.method === "POST") {
+            const userId = getUserId();
+            if (!userId) return error("Unauthorized", 401);
+            const { playlistId, songs } = await request.json();
+            if (!playlistId || !Array.isArray(songs)) return error("Invalid data");
+
+            // Verify playlist ownership
+            const pl = await env.DB.prepare("SELECT * FROM playlists WHERE id = ?").bind(playlistId).first();
+            if (!pl || pl.user_id !== userId) return error("Forbidden", 403);
+
+            // Fetch existing song IDs in this playlist
+            const { results: existingSongs } = await env.DB.prepare("SELECT json_extract(song_json, '$.id') as songId FROM playlist_songs WHERE playlist_id = ?").bind(playlistId).all();
+            const existingIds = new Set(existingSongs.map(r => r.songId));
+
+            const stmt = env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES (?, ?, 1, ?)");
+            const batch = [];
+            for (const song of songs) {
+                if (!existingIds.has(song.id)) {
+                    // Strip sensitive/temporary fields
+                    delete song.url;
+                    if (typeof song.lrc === 'string' && song.lrc.startsWith('http')) delete song.lrc;
+
+                    batch.push(stmt.bind(playlistId, JSON.stringify(song), Date.now()));
+                }
+            }
+
+            if (batch.length > 0) {
+                await env.DB.batch(batch);
+            }
+            return json({ success: true, count: batch.length });
         }
 
         // remove song from playlist
@@ -626,6 +720,10 @@ export default {
             const userId = getUserId();
             if (!userId) return error("Unauthorized", 401);
             const song = await request.json();
+            // Strip sensitive/temporary fields
+            delete song.url;
+            if (typeof song.lrc === 'string' && song.lrc.startsWith('http')) delete song.lrc;
+
             // Check dupe
             const exists = await env.DB.prepare("SELECT id FROM favorites WHERE user_id = ? AND json_extract(song_json, '$.id') = ?").bind(userId, song.id).first();
             if (!exists) {
@@ -641,6 +739,34 @@ export default {
             return json({ success: true });
         }
 
+        // Batch Add Favorites
+        if (path === "/api/favorites/batch" && request.method === "POST") {
+            const userId = getUserId();
+            if (!userId) return error("Unauthorized", 401);
+            const { songs } = await request.json();
+            if (!Array.isArray(songs)) return error("Invalid data");
+
+            const { results: existingFavs } = await env.DB.prepare("SELECT json_extract(song_json, '$.id') as songId FROM favorites WHERE user_id = ?").bind(userId).all();
+            const existingIds = new Set(existingFavs.map(r => r.songId));
+
+            const stmt = env.DB.prepare("INSERT INTO favorites (user_id, song_json, created_at) VALUES (?, ?, ?)");
+            const batch = [];
+            for (const song of songs) {
+                if (!existingIds.has(song.id)) {
+                    // Strip sensitive/temporary fields
+                    delete song.url;
+                    if (typeof song.lrc === 'string' && song.lrc.startsWith('http')) delete song.lrc;
+
+                    batch.push(stmt.bind(userId, JSON.stringify(song), Date.now()));
+                }
+            }
+
+            if (batch.length > 0) {
+                await env.DB.batch(batch);
+            }
+            return json({ success: true, count: batch.length });
+        }
+
         // 8. Play History
         if (path === "/api/history" && request.method === "GET") {
             const userId = getUserId();
@@ -652,6 +778,10 @@ export default {
             const userId = getUserId();
             if (!userId) return error("Unauthorized", 401);
             const song = await request.json();
+            // Strip sensitive/temporary fields
+            delete song.url;
+            if (typeof song.lrc === 'string' && song.lrc.startsWith('http')) delete song.lrc;
+
             await env.DB.prepare("INSERT INTO play_history (user_id, song_json, played_at) VALUES (?, ?, ?)").bind(userId, JSON.stringify(song), Date.now()).run();
             return json({ success: true });
         }

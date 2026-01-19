@@ -21,9 +21,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Init UI
     UI.init();
-    document.getElementById('user-name').textContent = currentUser.username || 'Guest';
-    if (currentUser.avatar) {
-        document.getElementById('user-avatar').src = currentUser.avatar;
+    const userNameEl = document.getElementById('user-name');
+    if (userNameEl) userNameEl.textContent = currentUser.username || 'Guest';
+    const userAvatarEl = document.getElementById('user-avatar');
+    if (userAvatarEl && currentUser.avatar) {
+        userAvatarEl.src = currentUser.avatar;
     }
 
     // State
@@ -39,8 +41,6 @@ document.addEventListener('DOMContentLoaded', async () => {
         hotSongsCache: {}
     };
 
-    // ... (rest of DOM elements)
-
     // DOM Elements
     const searchContainer = document.getElementById('search-container');
     const sourceControls = document.querySelector('.source-controls');
@@ -52,6 +52,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Hot Search Tags
     function initHotTags() {
+        if (!recContainer) return;
         let tags = JSON.parse(sessionStorage.getItem('hotTags') || '[]');
         if (tags.length === 0) {
             const pool = [
@@ -70,8 +71,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             span.textContent = tag;
             span.onclick = () => {
                 if (state.currentView !== 'search') switchView('search');
-                searchInput.value = tag;
-                triggerSearch();
+                if (searchInput) {
+                    searchInput.value = tag;
+                    triggerSearch();
+                }
             };
             recContainer.appendChild(span);
         });
@@ -88,44 +91,56 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (navItem) navItem.classList.add('active');
 
         const contentView = document.getElementById('content-view');
-        contentView.innerHTML = '';
-        contentView.appendChild(UI.songListContainer);
-        UI.songListContainer.style.display = 'block';
+        if (contentView) {
+            contentView.innerHTML = '';
+            contentView.appendChild(UI.songListContainer);
+            UI.songListContainer.style.display = 'block';
+        }
 
         if (viewName === 'hot') {
-            searchContainer.style.display = 'flex';
-            searchContainer.style.visibility = 'visible';
-            sourceControls.style.display = 'flex';
-            document.querySelector('.search-input-wrapper').style.visibility = 'hidden';
-            searchBtn.style.visibility = 'hidden';
-            multiToggle.style.display = 'none';
-            recContainer.style.display = 'none';
+            if (searchContainer) {
+                searchContainer.style.display = 'flex';
+                searchContainer.style.visibility = 'visible';
+            }
+            if (sourceControls) sourceControls.style.display = 'flex';
+            const inputWrapper = document.querySelector('.search-input-wrapper');
+            if (inputWrapper) inputWrapper.style.visibility = 'hidden';
+            if (searchBtn) searchBtn.style.visibility = 'hidden';
+            if (multiToggle) multiToggle.style.display = 'none';
+            if (recContainer) recContainer.style.display = 'none';
 
             if (state.activeSources.length > 1) {
                 state.activeSources = [state.activeSources[0]];
                 updateSourceChips();
             }
         } else {
-            document.querySelector('.search-input-wrapper').style.visibility = 'visible';
-            searchBtn.style.visibility = 'visible';
+            const inputWrapper = document.querySelector('.search-input-wrapper');
+            if (inputWrapper) inputWrapper.style.visibility = 'visible';
+            if (searchBtn) searchBtn.style.visibility = 'visible';
 
             if (viewName === 'search') {
-                searchContainer.style.display = 'flex';
-                searchContainer.style.visibility = 'visible';
-                sourceControls.style.display = 'flex';
-                multiToggle.style.display = 'flex';
-                recContainer.style.display = 'flex';
+                if (searchContainer) {
+                    searchContainer.style.display = 'flex';
+                    searchContainer.style.visibility = 'visible';
+                }
+                if (sourceControls) sourceControls.style.display = 'flex';
+                if (multiToggle) multiToggle.style.display = 'flex';
+                if (recContainer) recContainer.style.display = 'flex';
             } else {
-                searchContainer.style.display = 'flex';
-                searchContainer.style.visibility = 'visible';
-                sourceControls.style.display = 'none';
-                recContainer.style.display = 'none';
+                if (searchContainer) {
+                    searchContainer.style.display = 'flex';
+                    searchContainer.style.visibility = 'visible';
+                }
+                if (sourceControls) sourceControls.style.display = 'none';
+                if (recContainer) recContainer.style.display = 'none';
             }
         }
 
         if (viewName === 'search') {
-            searchInput.value = state.globalKeyword;
-            searchInput.placeholder = '搜索歌曲、歌手...';
+            if (searchInput) {
+                searchInput.value = state.globalKeyword;
+                searchInput.placeholder = '搜索歌曲、歌手...';
+            }
             if (state.globalResults.length > 0) {
                 UI.renderSongList(state.globalResults, state.searchPage, 50, (page) => {
                     state.searchPage = page;
@@ -141,16 +156,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             loadHotSongs(state.activeSources[0], state.hotPage);
         }
         else if (viewName === 'favorites') {
-            searchInput.value = '';
-            searchInput.placeholder = '搜索收藏...';
-            // Use DataService
+            if (searchInput) {
+                searchInput.value = '';
+                searchInput.placeholder = '搜索收藏...';
+            }
             const favs = DataService.favorites;
             state.currentListData = favs;
             UI.renderSongList(favs, 1, 1, null, true, 'favorites');
         }
         else if (viewName === 'history') {
-            searchInput.value = '';
-            searchInput.placeholder = '搜索历史...';
+            if (searchInput) {
+                searchInput.value = '';
+                searchInput.placeholder = '搜索历史...';
+            }
             const history = player.historyStack.slice().reverse();
             state.currentListData = history;
             if (history.length > 0) {
@@ -160,9 +178,10 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
         else if (viewName === 'playlist') {
-            searchInput.value = '';
-            searchInput.placeholder = '搜索歌单...';
-            // data is the playlist object
+            if (searchInput) {
+                searchInput.value = '';
+                searchInput.placeholder = '搜索歌单...';
+            }
             if (data && data.tracks) {
                 state.currentListData = data.tracks;
                 state.currentPlaylistId = data.id;
@@ -175,26 +194,28 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     async function loadHotSongs(source, page = 1) {
         state.hotPage = page;
-        if (page === 1 && state.hotSongsCache[source] && state.hotSongsCache[source].length > 0) {
-            UI.renderSongList(state.hotSongsCache[source], page, 50, (newPage) => {
-                loadHotSongs(source, newPage);
-            }, false, 'hot');
-            return;
-        }
-
         UI.showLoading();
         try {
             let keyword = '热歌榜';
             if (source === 'migu') keyword = '周杰伦';
             if (source === 'qq') keyword = '热歌';
 
-            const res = await MusicAPI.search(keyword, source, page, 20);
+            const res = await MusicAPI.search(keyword, source, page, 50);
 
-            if (res.length > 0) {
-                if (page === 1) {
-                    state.hotSongsCache[source] = res;
+            const uniqueMap = new Map();
+            res.forEach(item => {
+                if (!uniqueMap.has(item.id)) {
+                    const key = `${item.title.trim()}-${item.artist.trim()}`;
+                    if (![...uniqueMap.values()].some(v => `${v.title.trim()}-${v.artist.trim()}` === key)) {
+                        uniqueMap.set(item.id, item);
+                    }
                 }
-                UI.renderSongList(res, page, 50, (newPage) => {
+            });
+            const uniqueRes = [...uniqueMap.values()];
+
+            if (uniqueRes.length > 0) {
+                state.hotSongsCache[source] = uniqueRes;
+                UI.renderSongList(uniqueRes, 1, 1, (newPage) => {
                     loadHotSongs(source, newPage);
                 }, false, 'hot');
             } else {
@@ -209,6 +230,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     // --- Search & Filter ---
 
     function triggerSearch() {
+        if (!searchInput) return;
         const val = searchInput.value.trim();
         if (state.currentView === 'search') {
             if (val) {
@@ -232,7 +254,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             let merged = [];
             if (state.isMultiSource) {
                 const maxLength = Math.max(...results.map(r => r.length));
-                // Interleave results from all active sources
                 for (let i = 0; i < maxLength; i++) {
                     for (let j = 0; j < results.length; j++) {
                         if (results[j][i]) merged.push(results[j][i]);
@@ -276,13 +297,17 @@ document.addEventListener('DOMContentLoaded', async () => {
         UI.renderSongList(filtered, 1, 1, null, true, viewType, plId);
     }
 
-    searchInput.addEventListener('input', (e) => {
-        if (state.currentView !== 'search') doLocalFilter(e.target.value.trim());
-    });
-    searchInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') triggerSearch();
-    });
-    searchBtn.addEventListener('click', triggerSearch);
+    if (searchInput) {
+        searchInput.addEventListener('input', (e) => {
+            if (state.currentView !== 'search') doLocalFilter(e.target.value.trim());
+        });
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') triggerSearch();
+        });
+    }
+    if (searchBtn) {
+        searchBtn.addEventListener('click', triggerSearch);
+    }
 
     // --- Source Logic ---
     function getSourceDisplayName(src) {
@@ -295,35 +320,34 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    multiToggle.addEventListener('click', () => {
-        state.isMultiSource = !state.isMultiSource;
-        multiToggle.classList.toggle('active', state.isMultiSource);
+    if (multiToggle) {
+        multiToggle.addEventListener('click', () => {
+            state.isMultiSource = !state.isMultiSource;
+            multiToggle.classList.toggle('active', state.isMultiSource);
 
-        // Auto pause on mode toggle
-        if (window.player && typeof window.player.pause === 'function') {
-            window.player.pause();
-        }
+            if (window.player && typeof window.player.pause === 'function') {
+                window.player.pause();
+            }
 
-        if (!state.isMultiSource && state.activeSources.length > 1) {
-            // Revert to first active source when turning off multi-source
-            state.activeSources = [state.activeSources[0]];
-        }
+            if (!state.isMultiSource && state.activeSources.length > 1) {
+                state.activeSources = [state.activeSources[0]];
+            }
 
-        const names = state.activeSources.map(s => getSourceDisplayName(s)).join(' 和 ');
-        UI.showToast(`已为您切换至 ${names}，播放已暂停`, 'info');
+            const names = state.activeSources.map(s => getSourceDisplayName(s)).join(' 和 ');
+            UI.showToast(`已为您切换至 ${names}，播放已暂停`, 'info');
 
-        updateSourceChips();
-        if (state.currentView === 'search' && state.globalKeyword) {
-            state.searchPage = 1;
-            doGlobalSearch();
-        }
-    });
+            updateSourceChips();
+            if (state.currentView === 'search' && state.globalKeyword) {
+                state.searchPage = 1;
+                doGlobalSearch();
+            }
+        });
+    }
 
     sourceChips.forEach(chip => {
         chip.addEventListener('click', () => {
             const source = chip.dataset.source;
 
-            // HOT view is always single source
             if (state.currentView === 'hot') {
                 if (window.player && typeof window.player.pause === 'function') {
                     window.player.pause();
@@ -337,7 +361,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             if (state.isMultiSource) {
-                // Multi-source Toggle Logic
                 if (state.activeSources.includes(source)) {
                     if (state.activeSources.length > 1) {
                         state.activeSources = state.activeSources.filter(s => s !== source);
@@ -356,7 +379,6 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const names = state.activeSources.map(s => getSourceDisplayName(s)).join(' 和 ');
                 UI.showToast(`已为您切换至 ${names}，播放已暂停`, 'info');
             } else {
-                // Single source Logic
                 if (state.activeSources.length === 1 && state.activeSources[0] === source) return;
 
                 if (window.player && typeof window.player.pause === 'function') {
@@ -388,26 +410,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     let isPlExpanded = true;
 
     async function renderSidebarPlaylists() {
-        // Use DataService
+        if (!plSection) return;
         await DataService.fetchPlaylists();
         const playlists = DataService.playlists;
-
         plSection.innerHTML = '';
-
-        // Group by type (Local vs Synced)
-        // const localPls = playlists.filter(p => !p.is_sync);
-        // const syncedPls = playlists.filter(p => p.is_sync);
-
-        // 1. All Playlists (Unified)
         playlists.forEach(pl => {
-            // Treat all as local for UI purposes
             const div = createPlaylistEl(pl);
             plSection.appendChild(div);
         });
-
-        // 2. Synced Playlists (Removed Grouping)
-        // if (syncedPls.length > 0) { ... }
-
         if (playlists.length === 0) {
             plSection.innerHTML = '<div style="padding:10px 30px;color:#999;font-size:12px;">暂无歌单</div>';
         }
@@ -416,8 +426,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function createPlaylistEl(pl) {
         const div = document.createElement('div');
         div.className = 'nav-item pl-nav-item';
-        // const icon = pl.is_sync ? (pl.platform === 'netease' ? 'fa-cloud' : 'fa-music') : 'fa-list-ul';
-        const icon = 'fa-list-ul'; // Unified Icon
+        const icon = 'fa-list-ul';
         div.innerHTML = `
             <div style="display:flex;align-items:center;flex:1;overflow:hidden;">
                 <i class="fas ${icon}"></i> 
@@ -426,33 +435,38 @@ document.addEventListener('DOMContentLoaded', async () => {
             <i class="fas fa-trash-alt nav-action-icon del-btn" style="font-size:12px;opacity:0;transition:opacity 0.2s;" title="删除"></i>
         `;
 
-        // Always enable delete/context menu for all playlists
-        // if (!pl.is_sync) { ... } -> Removed condition
-
-        div.onmouseenter = () => div.querySelector('.del-btn').style.opacity = '1';
-        div.onmouseleave = () => div.querySelector('.del-btn').style.opacity = '0';
-        div.querySelector('.del-btn').addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            UI.showDialog({
-                title: '删除歌单',
-                content: `确定删除歌单 "${pl.name}" 吗？`,
-                onConfirm: async () => {
-                    try {
-                        await DataService.deletePlaylist(pl.id);
-                        UI.showToast('歌单已删除');
-                        renderSidebarPlaylists();
-                        if (state.currentView === 'playlist') {
-                            switchView('search');
+        div.onmouseenter = () => {
+            const btn = div.querySelector('.del-btn');
+            if (btn) btn.style.opacity = '1';
+        };
+        div.onmouseleave = () => {
+            const btn = div.querySelector('.del-btn');
+            if (btn) btn.style.opacity = '0';
+        };
+        const delBtn = div.querySelector('.del-btn');
+        if (delBtn) {
+            delBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                UI.showDialog({
+                    title: '删除歌单',
+                    content: `确定删除歌单 "${pl.name}" 吗？`,
+                    onConfirm: async () => {
+                        try {
+                            await DataService.deletePlaylist(pl.id);
+                            UI.showToast('歌单已删除');
+                            renderSidebarPlaylists();
+                            if (state.currentView === 'playlist') {
+                                switchView('search');
+                            }
+                        } catch (err) {
+                            UI.showToast('删除失败', 'error');
                         }
-                    } catch (err) {
-                        UI.showToast('删除失败', 'error');
                     }
-                }
+                });
             });
-        });
+        }
 
-        // Add context menu listener to the WHOLE div
         div.addEventListener('contextmenu', (e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -478,11 +492,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         div.addEventListener('click', async () => {
             document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
             div.classList.add('active');
-
-            // Force refresh data from server to ensure latest songs
             await DataService.fetchPlaylists();
             const freshPl = DataService.playlists.find(p => p.id === pl.id);
-
             if (freshPl) {
                 switchView('playlist', freshPl);
             } else {
@@ -503,7 +514,8 @@ document.addEventListener('DOMContentLoaded', async () => {
                         await DataService.createPlaylist(name);
                         UI.showToast('歌单创建成功', 'success');
                         renderSidebarPlaylists();
-                        UI.uniDialog.classList.remove('show');
+                        const uniDialog = document.getElementById('uni-dialog');
+                        if (uniDialog) uniDialog.classList.remove('show');
                     } catch (e) {
                         UI.showToast('新建歌单失败', 'error');
                     }
@@ -512,21 +524,26 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    document.getElementById('create-pl-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        createPlaylist();
-    });
+    const createPlBtn = document.getElementById('create-pl-btn');
+    if (createPlBtn) {
+        createPlBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            createPlaylist();
+        });
+    }
 
-    plToggleIcon.addEventListener('click', () => {
-        isPlExpanded = !isPlExpanded;
-        if (isPlExpanded) {
-            plSection.classList.remove('collapsed');
-            plToggleIcon.classList.remove('rotate');
-        } else {
-            plSection.classList.add('collapsed');
-            plToggleIcon.classList.add('rotate');
-        }
-    });
+    if (plToggleIcon) {
+        plToggleIcon.addEventListener('click', () => {
+            isPlExpanded = !isPlExpanded;
+            if (isPlExpanded) {
+                if (plSection) plSection.classList.remove('collapsed');
+                plToggleIcon.classList.remove('rotate');
+            } else {
+                if (plSection) plSection.classList.add('collapsed');
+                plToggleIcon.classList.add('rotate');
+            }
+        });
+    }
 
     // --- Init ---
     document.querySelectorAll('.nav-item[data-view]').forEach(item => {
@@ -535,6 +552,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     renderSidebarPlaylists();
     switchView('search');
+
+    document.addEventListener('playlists-updated', () => {
+        renderSidebarPlaylists();
+    });
 
     // --- Global Events ---
     // Avatar Menu
@@ -548,97 +569,123 @@ document.addEventListener('DOMContentLoaded', async () => {
             UI.showModal('help-modal');
         });
     }
-    document.getElementById('close-help').addEventListener('click', () => {
-        UI.closeModal('help-modal');
-    });
-    document.getElementById('help-ok-btn').addEventListener('click', () => {
-        UI.closeModal('help-modal');
-    });
+    const closeHelp = document.getElementById('close-help');
+    if (closeHelp) {
+        closeHelp.addEventListener('click', () => {
+            UI.closeModal('help-modal');
+        });
+    }
+    const helpOk = document.getElementById('help-ok-btn');
+    if (helpOk) {
+        helpOk.addEventListener('click', () => {
+            UI.closeModal('help-modal');
+        });
+    }
 
     // Edit Profile Logic
-    document.getElementById('edit-profile-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        UI.showModal('profile-modal');
-        // Pre-fill
-        document.getElementById('edit-nickname').value = currentUser.username || '';
-        document.getElementById('edit-avatar-preview').src = currentUser.avatar || 'https://placehold.co/80x80?text=User';
-    });
+    const editProfileBtn = document.getElementById('edit-profile-btn');
+    if (editProfileBtn) {
+        editProfileBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            UI.showModal('profile-modal');
+            const nickInput = document.getElementById('edit-nickname');
+            const avatarPrev = document.getElementById('edit-avatar-preview');
+            if (nickInput) nickInput.value = currentUser.username || '';
+            if (avatarPrev) avatarPrev.src = currentUser.avatar || 'https://placehold.co/80x80?text=User';
+        });
+    }
 
-    document.getElementById('close-profile').addEventListener('click', () => {
-        UI.closeModal('profile-modal');
-    });
+    const closeProfile = document.getElementById('close-profile');
+    if (closeProfile) {
+        closeProfile.addEventListener('click', () => {
+            UI.closeModal('profile-modal');
+        });
+    }
 
     // Avatar Click in Edit Modal
-    document.getElementById('profile-avatar-wrapper').addEventListener('click', () => {
-        avatarInput.click();
-    });
+    const profileAvatarWrapper = document.getElementById('profile-avatar-wrapper');
+    if (profileAvatarWrapper && avatarInput) {
+        profileAvatarWrapper.addEventListener('click', () => {
+            avatarInput.click();
+        });
+    }
+    const triggerAvatarUpload = document.getElementById('trigger-avatar-upload');
+    if (triggerAvatarUpload && avatarInput) {
+        triggerAvatarUpload.addEventListener('click', () => {
+            avatarInput.click();
+        });
+    }
 
-    avatarInput.addEventListener('change', (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+    if (avatarInput) {
+        avatarInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = async (ev) => {
-            const base64 = ev.target.result;
-            // Preview
-            document.getElementById('edit-avatar-preview').src = base64;
-            // Temporarily store for save
-            avatarInput.dataset.temp = base64;
-        };
-        reader.readAsDataURL(file);
-    });
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+                const base64 = ev.target.result;
+                const preview = document.getElementById('edit-avatar-preview');
+                if (preview) preview.src = base64;
+                avatarInput.dataset.temp = base64;
+            };
+            reader.readAsDataURL(file);
+        });
+    }
 
-    document.getElementById('save-profile-btn').addEventListener('click', async () => {
-        const avatarInput = document.getElementById('avatar-input');
-        const newAvatar = avatarInput.dataset.temp || currentUser.avatar;
+    const saveProfileBtn = document.getElementById('save-profile-btn');
+    if (saveProfileBtn) {
+        saveProfileBtn.addEventListener('click', async () => {
+            const avatarInput = document.getElementById('avatar-input');
+            const newAvatar = avatarInput ? (avatarInput.dataset.temp || currentUser.avatar) : currentUser.avatar;
 
-        try {
-            // Update Profile API (Avatar only now)
-            await fetch(`${API_BASE}/user/profile`, {
-                method: 'POST',
-                headers: { ...DataService.authHeader(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    avatar: newAvatar
-                })
-            });
+            try {
+                await fetch(`${API_BASE}/user/profile`, {
+                    method: 'POST',
+                    headers: { ...DataService.authHeader(), 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ avatar: newAvatar })
+                });
 
-            // Update Local Cache
-            const updatedUser = { ...currentUser, avatar: newAvatar };
-            localStorage.setItem('currentUser', JSON.stringify(updatedUser));
+                const updatedUser = { ...currentUser, avatar: newAvatar };
+                localStorage.setItem('currentUser', JSON.stringify(updatedUser));
 
-            // Update UI
-            document.getElementById('user-avatar').src = newAvatar;
+                const userAvatarEl = document.getElementById('user-avatar');
+                if (userAvatarEl) userAvatarEl.src = newAvatar;
 
-            UI.showToast('头像已更新');
-            UI.closeModal('profile-modal');
+                UI.showToast('头像已更新');
+                UI.closeModal('profile-modal');
 
-            // Reload to reflect all changes safely
-            setTimeout(() => location.reload(), 1000);
-        } catch (err) {
-            UI.showToast('更新失败', 'error');
-        }
-    });
-
-    document.getElementById('logout-btn').addEventListener('click', () => {
-        UI.showDialog({
-            title: '退出登录',
-            content: '确定要退出登录吗？',
-            onConfirm: () => {
-                AuthService.logout();
-                window.location.href = 'index.html';
+                setTimeout(() => location.reload(), 1000);
+            } catch (err) {
+                UI.showToast('更新失败', 'error');
             }
         });
-    });
+    }
 
-    // Sync Logic (Digital ID)
-    const qrModal = document.getElementById('qr-sync-modal');
-    // We reuse the existing modal structure but change content dynamically
+    const logoutBtn = document.getElementById('logout-btn');
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            UI.showDialog({
+                title: '退出登录',
+                content: '确定要退出登录吗？',
+                onConfirm: () => {
+                    AuthService.logout();
+                    window.location.href = 'index.html';
+                }
+            });
+        });
+    }
+
+    // Sync Logic
     const qrDetail = document.querySelector('.qr-detail');
     const qrPlatforms = document.querySelector('.sync-platforms');
     const backBtn = document.getElementById('back-to-select');
 
-    // Init Platform Cards
+    if (qrPlatforms) {
+        initSyncPlatforms();
+    }
+
     function initSyncPlatforms() {
+        if (!qrPlatforms) return;
         qrPlatforms.innerHTML = `
             <div class="qr-card" data-pf="netease">
                 <i class="fas fa-cloud" style="font-size:32px;color:#c20c0c;margin-bottom:10px;"></i>
@@ -658,7 +705,6 @@ document.addEventListener('DOMContentLoaded', async () => {
             </div>
         `;
 
-        // Bind events
         document.querySelectorAll('.qr-card').forEach(card => {
             card.addEventListener('click', () => {
                 const platform = card.dataset.pf;
@@ -667,251 +713,176 @@ document.addEventListener('DOMContentLoaded', async () => {
         });
     }
 
-    document.getElementById('sync-btn').addEventListener('click', (e) => {
-        e.stopPropagation();
-        resetSyncModal();
-        UI.showModal('qr-sync-modal');
-        // Update title
-        document.querySelector('#qr-sync-modal .modal-header span').textContent = '导入歌单';
-    });
+    const syncBtn = document.getElementById('sync-btn');
+    if (syncBtn) {
+        syncBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            resetSyncModal();
+            UI.showModal('qr-sync-modal');
+            const modalHeader = document.querySelector('#qr-sync-modal .modal-header span');
+            if (modalHeader) modalHeader.textContent = '导入歌单';
+        });
+    }
 
-    document.getElementById('close-qr-sync').addEventListener('click', () => {
-        UI.closeModal('qr-sync-modal');
-    });
+    const closeQrSync = document.getElementById('close-qr-sync');
+    if (closeQrSync) {
+        closeQrSync.addEventListener('click', () => {
+            UI.closeModal('qr-sync-modal');
+        });
+    }
 
-    backBtn.addEventListener('click', resetSyncModal);
+    if (backBtn) {
+        backBtn.addEventListener('click', resetSyncModal);
+    }
 
     function resetSyncModal() {
-        qrPlatforms.style.display = 'grid';
-        qrDetail.style.display = 'none';
-        // Clear previous input if needed
+        if (qrPlatforms) qrPlatforms.style.display = 'grid';
+        if (qrDetail) qrDetail.style.display = 'none';
     }
 
     function showIdInput(platform) {
+        if (!qrPlatforms || !qrDetail) return;
         qrPlatforms.style.display = 'none';
         qrDetail.style.display = 'block';
 
         const names = { 'netease': '网易云音乐', 'qq': 'QQ音乐', 'migu': '咪咕音乐', 'kuwo': '酷我音乐' };
         const name = names[platform] || platform;
 
-        let hintHtml = '';
-        if (platform === 'qq' || platform === 'migu') {
-            hintHtml = `
-                <div style="background:#f5f5f5;padding:12px;border-radius:8px;margin-bottom:20px;font-size:12px;color:#666;text-align:left;line-height:1.6;">
-                    <strong><i class="fas fa-info-circle"></i> 如何获取ID?</strong><br>
-                    1. 在App中找到歌单，分享到微信/QQ<br>
-                    2. 用浏览器打开分享链接<br>
-                    3. 链接中的 id= 后面的数字即为ID
-                </div>
-            `;
-        }
-
-        // Inject Form (Updated for Link Import)
         qrDetail.innerHTML = `
             <div style="padding: 10px 20px;">
                 <i class="fas fa-link" style="font-size: 48px; color: #1ecf9f; margin-bottom: 20px;"></i>
                 <h3 style="margin-bottom: 10px;">导入 ${name} 歌单</h3>
-                <p style="font-size: 12px; color: #999; margin-bottom: 20px;">
-                    请粘贴歌单分享链接。我们将同步歌单内容，并为您保留手动添加的歌曲。
-                </p>
-                
-                <div style="background:#f5f5f5;padding:12px;border-radius:8px;margin-bottom:20px;font-size:12px;color:#666;text-align:left;line-height:1.6;">
-                    <strong><i class="fas fa-info-circle"></i> 如何获取链接?</strong><br>
-                    1. 在App中找到歌单，点击"分享"<br>
-                    2. 选择"分享到微信"微信打开后点击..."复制链接"<br>
-                    3. 将链接粘贴到下方输入框
-                </div>
-
+                <p style="font-size: 12px; color: #999; margin-bottom: 20px;">请粘贴歌单分享链接。</p>
                 <div style="margin-bottom: 20px;">
-                    <input type="text" id="sync-uid-input" placeholder="请粘贴分享链接 (如 https://...)" style="
-                        width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 14px; text-align: center; box-sizing: border-box;
-                    ">
+                    <input type="text" id="sync-uid-input" placeholder="请粘贴分享链接" style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px;">
                 </div>
-                <button id="start-sync-btn" class="btn-primary" style="width: 100%; margin-bottom: 10px;">开始导入</button>
-                <div id="sync-status" style="height: 20px; font-size: 12px; color: #666; margin-top: 10px;"></div>
+                <button id="start-sync-btn" class="btn-primary" style="width: 100%;">开始导入</button>
+                <div id="sync-status" style="height: 20px; font-size: 12px; margin-top: 10px;"></div>
             </div>
-            <button class="btn-text" id="back-to-select-dynamic" style="margin-top:5px;color:#666;background:none;border:none;cursor:pointer;">&lt; 返回选择平台</button>
+            <button class="btn-text" id="back-to-select-dynamic" style="margin-top:5px;background:none;border:none;cursor:pointer;">&lt; 返回</button>
         `;
 
-        document.getElementById('back-to-select-dynamic').onclick = resetSyncModal;
+        const backDynamic = document.getElementById('back-to-select-dynamic');
+        if (backDynamic) backDynamic.onclick = resetSyncModal;
 
         const btn = document.getElementById('start-sync-btn');
         const input = document.getElementById('sync-uid-input');
         const status = document.getElementById('sync-status');
 
-        input.focus();
+        if (input) input.focus();
 
-        // Helper: Parse Link
         const parseLink = (text, platform) => {
-            let id = null;
-            // Common patterns
             const idMatch = text.match(/id=(\d+)/);
             if (idMatch) return idMatch[1];
-
             if (platform === 'netease') {
                 const match = text.match(/playlist\/(\d+)/) || text.match(/id=(\d+)/);
                 if (match) return match[1];
             }
             if (platform === 'qq') {
-                const match = text.match(/id=(\d+)/); // QQ uses id=xxx usually
+                const match = text.match(/id=(\d+)/);
                 if (match) return match[1];
             }
-            if (platform === 'kuwo') {
-                // http://m.kuwo.cn/newh5app/playlist_detail/3386004928
-                const match = text.match(/playlist_detail\/(\d+)/) || text.match(/id=(\d+)/);
-                if (match) return match[1];
-            }
-            if (platform === 'migu') {
-                // https://music.migu.cn/v3/music/playlist/186065680
-                const match = text.match(/playlist\/(\d+)/) || text.match(/id=(\d+)/);
-                if (match) return match[1];
-            }
-
-            // Try generic number extraction if reasonable length (5-12 digits)
             const numMatch = text.match(/(\d{5,12})/);
             if (numMatch) return numMatch[1];
-
-            return text.trim(); // Fallback to raw input (maybe user entered ID directly)
+            return text.trim();
         };
 
-        btn.onclick = async () => {
-            const val = input.value.trim();
-            if (!val) {
-                status.textContent = '请输入链接或ID';
-                status.style.color = '#ff5252';
-                return;
-            }
-
-            const uid = parseLink(val, platform);
-            if (!uid || uid.length < 4) {
-                status.textContent = '无法识别链接中的ID，请重试';
-                status.style.color = '#ff5252';
-                return;
-            }
-
-            btn.disabled = true;
-            btn.textContent = '正在获取歌单...';
-            status.textContent = `正在连接 ${name} 服务...`;
-            status.style.color = '#666';
-
-            try {
-                // 1. Fetch Details (New method to get SINGLE playlist)
-                // We need to use MusicAPI.getPlaylistSongs directly as we are importing a specific playlist, NOT user playlists
-                // But wait, user said "Import Playlist" via link.
-                // MusicAPI.getPlaylistSongs returns array of songs. We also need the playlist name.
-                // We might need to fake the name or fetch it.
-                // For simplicity, let's fetch songs. If we can't get name, use "Platform: ID".
-
-                let songs = await MusicAPI.getPlaylistSongs(platform === 'qq' ? 'tencent' : platform, uid);
-
-                if (!songs || songs.length === 0) {
-                    throw new Error('未找到歌单或歌单为空');
+        if (btn) {
+            btn.onclick = async () => {
+                const val = input.value.trim();
+                if (!val) {
+                    status.textContent = '请输入链接或ID';
+                    status.style.color = '#ff5252';
+                    return;
                 }
 
-                // 歌单命名：尝试获取真实歌单名称
-                const prefixMap = {
-                    'netease': '网易',
-                    'qq': 'QQ',
-                    'tencent': 'QQ',
-                    'kuwo': '酷我',
-                    'migu': '咪咕'
-                };
-                const prefix = prefixMap[platform] || platform;
+                const uid = parseLink(val, platform);
+                if (!uid || uid.length < 4) {
+                    status.textContent = '无法识别ID';
+                    status.style.color = '#ff5252';
+                    return;
+                }
 
-                // 尝试获取歌单真实名称
-                let realName = null;
+                btn.disabled = true;
+                btn.textContent = '正在导入...';
+
                 try {
-                    const info = await MusicAPI.getPlaylistInfo(platform === 'qq' ? 'tencent' : platform, uid);
-                    if (info && info.name) {
-                        realName = info.name;
+                    let songs = await MusicAPI.getPlaylistSongs(platform === 'qq' ? 'tencent' : platform, uid);
+                    if (!songs || songs.length === 0) throw new Error('歌单为空');
+
+                    let realName = null;
+                    try {
+                        const info = await MusicAPI.getPlaylistInfo(platform === 'qq' ? 'tencent' : platform, uid);
+                        if (info && info.name) realName = info.name;
+                    } catch (e) { }
+
+                    // Platform prefix for playlist name
+                    const platformPrefixMap = { 'netease': '网易', 'qq': 'QQ', 'tencent': 'QQ', 'migu': '咪咕', 'kuwo': '酷我' };
+                    const platformPrefix = platformPrefixMap[platform] || platform;
+
+                    // Final playlist name with platform prefix
+                    const baseName = realName || `导入歌单_${uid}`;
+                    const finalPlName = `${platformPrefix}：${baseName}`;
+
+                    const payload = [{
+                        id: uid,
+                        name: finalPlName,
+                        tracks: songs.map(s => ({
+                            // Preserve the ID exactly as returned from getPlaylistSongs (format: server-id)
+                            id: s.id,
+                            title: s.title,  // No suffix needed, playlist name has the prefix
+                            artist: s.artist,
+                            source: s.source || (platform === 'tencent' ? 'qq' : platform),
+                            isImported: true,
+                            album: s.album || '',
+                            cover: s.cover || '',
+                            url: '',  // Will be fetched on-demand
+                            lrc: ''   // Will be fetched on-demand
+                        }))
+                    }];
+
+                    const res = await DataService.importPlaylists(platform, uid, payload);
+                    if (res.success) {
+                        status.textContent = '导入成功！';
+                        status.style.color = '#1ecf9f';
+
+                        // Show different toast based on whether we got the real name
+                        if (realName) {
+                            UI.showToast(`成功导入 ${songs.length} 首歌曲！`);
+                        } else {
+                            UI.showToast(`已导入 ${songs.length} 首歌曲，请右键歌单重命名`);
+                        }
+
+                        setTimeout(async () => {
+                            UI.closeModal('qr-sync-modal');
+                            await DataService.fetchPlaylists();
+                            renderSidebarPlaylists();
+                        }, 1500);
+                    } else {
+                        throw new Error(res.message || '保存失败');
                     }
                 } catch (e) {
-                    console.log('Failed to get playlist name, using ID');
+                    btn.disabled = false;
+                    btn.textContent = '开始导入';
+                    status.textContent = e.message;
+                    status.style.color = '#ff5252';
                 }
-
-                const platformNamesShort = {
-                    'netease': '网易',
-                    'qq': 'QQ',
-                    'tencent': 'QQ',
-                    'kuwo': '酷我',
-                    'migu': '咪咕'
-                };
-                const pfSuffix = platformNamesShort[platform] || platform;
-
-                // 2. Prep restricted payload (only title and artist)
-                const finalPlName = realName || `导入歌单_${uid}`;
-                const payload = [{
-                    id: uid,
-                    name: finalPlName,
-                    tracks: songs.map(s => ({
-                        id: s.id, // Keep ID for uniqueness in frontend if needed
-                        title: `${s.title} (${pfSuffix})`,
-                        artist: s.artist,
-                        source: platform === 'tencent' ? 'qq' : platform,
-                        isImported: true, // Mark for on-demand search
-                        album: '',
-                        cover: '',
-                        url: '',
-                        lrc: ''
-                    }))
-                }];
-
-                status.textContent = `获取到 ${songs.length} 首歌曲，正在保存...`;
-                btn.textContent = '正在保存...';
-
-                // 2. Send to Backend
-                const res = await DataService.importPlaylists(platform, uid, payload);
-
-                if (res.success) {
-                    status.textContent = `导入成功！`;
-                    status.style.color = '#1ecf9f';
-                    UI.showToast(`导入成功！保留了您的本地修改`, 'success');
-
-                    setTimeout(async () => {
-                        UI.closeModal('qr-sync-modal');
-                        await DataService.fetchPlaylists();
-                        renderSidebarPlaylists();
-                    }, 1500);
-                } else {
-                    throw new Error(res.message || '保存失败');
-                }
-            } catch (e) {
-                btn.disabled = false;
-                btn.textContent = '开始导入';
-                let msg = e.message;
-                if (msg.includes('Failed to fetch')) msg = '网络请求失败，请检查网络或跨域设置';
-                status.textContent = msg;
-                status.style.color = '#ff5252';
-                console.error(e);
-            }
-        };
-
-        input.onkeydown = (e) => {
-            if (e.key === 'Enter') btn.click();
-        };
+            };
+        }
     }
 
-    // Remove old listeners references if any (cleaned up by replacement)
-
-    // Listen for playlist updates (from UI add action)
     document.addEventListener('playlist-updated', async (e) => {
         const plId = e.detail.id;
-        // 1. Always re-fetch playlists to get latest tracks
         await DataService.fetchPlaylists();
-
-        // 2. If we are currently viewing ANY playlist, check if it's the modified one
-        if (state.currentView === 'playlist') {
+        if (state.currentView === 'playlist' && state.currentPlaylistId === plId) {
             const pl = DataService.playlists.find(p => p.id === plId);
-
-            // Re-render if the modified playlist matches the current one
-            if (pl && state.currentPlaylistId === plId) {
+            if (pl) {
                 state.currentListData = pl.tracks;
                 UI.renderSongList(pl.tracks, 1, 1, null, true, 'playlist', pl.id);
             }
         }
     });
 
-    // 监听收藏更新事件（从收藏页面取消收藏时刷新列表）
     document.addEventListener('favorites-updated', async () => {
         if (state.currentView === 'favorites') {
             await DataService.fetchFavorites();
@@ -926,7 +897,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     document.addEventListener('click', () => {
-        document.getElementById('song-ctx-menu').style.display = 'none';
-        document.getElementById('pl-ctx-menu').style.display = 'none';
+        const songMenu = document.getElementById('song-ctx-menu');
+        const plMenu = document.getElementById('pl-ctx-menu');
+        if (songMenu) songMenu.style.display = 'none';
+        if (plMenu) plMenu.style.display = 'none';
     });
 });

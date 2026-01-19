@@ -8,8 +8,17 @@ class MusicPlayer {
         this.mode = 'list'; // list, single, shuffle
         this.lyrics = [];
         this.lyricIndex = -1;
-        this.loadingTimer = null; // 为加载提示增加定时器
+        this.loadingTimer = null;
 
+        // Audio Effects State
+        this.audioCtx = null;
+        this.effectMode = 'original';
+        this.isAudioContextConnected = false;
+
+        // Ensure CORS for audio context processing
+        this.audio.crossOrigin = "anonymous";
+
+        this.initAudioContext();
         this.setupAudioEvents();
         this.bindControls();
     }
@@ -26,6 +35,9 @@ class MusicPlayer {
 
         this.audio.addEventListener('play', () => {
             this.isPlaying = true;
+            if (this.audioCtx && this.audioCtx.state === 'suspended') {
+                this.audioCtx.resume();
+            }
             if (UI.updatePlayState) UI.updatePlayState(true);
         });
 
@@ -70,7 +82,10 @@ class MusicPlayer {
             // Auto-retry logic for expired URLs
             if (this.currentTrack && !this.currentTrack._retried) {
                 this.currentTrack._retried = true;
+                console.log("Retrying playback with fresh URL...", this.currentTrack.title);
                 try {
+                    // Temporarily fail the URL to force refresh if logic depends on it
+                    this.currentTrack.url = null;
                     const detail = await MusicAPI.getSongDetails(this.currentTrack);
                     if (detail && detail.url) {
                         this.currentTrack.url = detail.url;
@@ -136,6 +151,15 @@ class MusicPlayer {
             else if (val < 0.5) volIcon.className = 'fas fa-volume-down';
             else volIcon.className = 'fas fa-volume-up';
         }
+
+
+        // Global Keyboard Controls
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'TEXTAREA') {
+                e.preventDefault();
+                this.togglePlay();
+            }
+        });
     }
 
     async play(track, isFromHistory = false, playlist = null) {
@@ -306,6 +330,43 @@ class MusicPlayer {
         }
     }
 
+    async checkAudioSilence() {
+        if (!this.audioCtx || this.effectMode === 'original' || !this.isPlaying) return;
+
+        // Create an AnalyserNode to check for silence
+        const analyser = this.audioCtx.createAnalyser();
+        analyser.fftSize = 256;
+        const bufferLength = analyser.frequencyBinCount;
+        const dataArray = new Uint8Array(bufferLength);
+
+        // Connect the masterGain to the analyser
+        this.masterGain.connect(analyser);
+
+        // Wait a moment for audio to process through the graph
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        analyser.getByteFrequencyData(dataArray);
+
+        // Calculate average volume
+        let sum = 0;
+        for (let i = 0; i < bufferLength; i++) {
+            sum += dataArray[i];
+        }
+        const average = sum / bufferLength;
+
+        // Disconnect analyser
+        this.masterGain.disconnect(analyser);
+        analyser.disconnect();
+
+        // If average volume is very low, it might indicate a CORS issue preventing Web Audio API from processing
+        // A threshold of 5-10 is usually safe for silence detection.
+        if (average < 5) {
+            console.warn("Detected potential audio silence with effects. This might be due to CORS restrictions on the audio source when using Web Audio API effects.");
+            UI.showToast('音效模式下无声，可能因音源CORS限制。已自动切换回原声模式。', 'warning');
+            this.setAudioEffect('original'); // Fallback to original mode
+        }
+    }
+
     playNext(auto = false) {
         if (this.playlist.length === 0) return;
 
@@ -414,6 +475,109 @@ class MusicPlayer {
 
     seek(time) {
         if (isFinite(time)) this.audio.currentTime = time;
+    }
+
+    initAudioContext() {
+        if (this.audioCtx) return;
+        try {
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            this.audioCtx = new AudioContext();
+            this.source = this.audioCtx.createMediaElementSource(this.audio);
+
+            // Create Nodes
+            this.lowFilter = this.audioCtx.createBiquadFilter();
+            this.lowFilter.type = 'lowshelf';
+            this.lowFilter.frequency.value = 200;
+
+            this.highFilter = this.audioCtx.createBiquadFilter();
+            this.highFilter.type = 'highshelf';
+            this.highFilter.frequency.value = 3000;
+
+            this.convolver = this.audioCtx.createConvolver();
+            this.convolver.buffer = this.createImpulseResponse(1.5, 1.5);
+
+            this.reverbGain = this.audioCtx.createGain();
+            this.reverbGain.gain.value = 0;
+
+            // Master Gain
+            this.masterGain = this.audioCtx.createGain();
+
+            // Connect initial: Source -> Master -> Dest
+            this.source.connect(this.masterGain);
+            this.masterGain.connect(this.audioCtx.destination);
+            this.isAudioContextConnected = true;
+
+        } catch (e) {
+            console.error("Web Audio API initialization failed", e);
+            this.isAudioContextConnected = false;
+        }
+    }
+
+    createImpulseResponse(duration, decay) {
+        const rate = this.audioCtx.sampleRate;
+        const length = rate * duration;
+        const impulse = this.audioCtx.createBuffer(2, length, rate);
+        const left = impulse.getChannelData(0);
+        const right = impulse.getChannelData(1);
+
+        for (let i = 0; i < length; i++) {
+            const n = length - i;
+            left[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+            right[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+        }
+        return impulse;
+    }
+
+    setAudioEffect(mode) {
+        if (!this.audioCtx) this.initAudioContext();
+        if (!this.isAudioContextConnected) {
+            console.warn("AudioContext not connected, skipping effect application");
+            return;
+        }
+
+        this.effectMode = mode;
+        try {
+            // Reset Connections
+            this.source.disconnect();
+            this.lowFilter.disconnect();
+            this.highFilter.disconnect();
+            this.convolver.disconnect();
+            this.reverbGain.disconnect();
+            this.masterGain.disconnect();
+
+            if (mode === 'original') {
+                this.source.connect(this.masterGain);
+                this.masterGain.connect(this.audioCtx.destination);
+                return;
+            }
+
+            this.source.connect(this.lowFilter);
+            this.lowFilter.connect(this.highFilter);
+            let lastNode = this.highFilter;
+
+            if (mode === 'headphone') {
+                this.lowFilter.gain.value = 3;
+                this.highFilter.gain.value = 3;
+                lastNode.connect(this.masterGain);
+            } else if (mode === 'speaker') {
+                this.lowFilter.gain.value = 6;
+                this.highFilter.gain.value = 6;
+                lastNode.connect(this.masterGain);
+                lastNode.connect(this.convolver);
+                this.convolver.connect(this.reverbGain);
+                this.reverbGain.connect(this.masterGain);
+                this.reverbGain.gain.value = 0.4;
+            }
+            this.masterGain.connect(this.audioCtx.destination);
+        } catch (err) {
+            console.error("Failed to set audio effect (likely CORS):", err);
+            // Emergency reconnect directly skip all nodes
+            try {
+                this.source.disconnect();
+                this.source.connect(this.audioCtx.destination);
+                UI.showToast("该歌曲不支持音效，已切换至原声播放", "warning");
+            } catch (e) { }
+        }
     }
 }
 

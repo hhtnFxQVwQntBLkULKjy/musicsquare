@@ -12,6 +12,23 @@ const MusicAPI = {
 
     searchCache: new Map(),
 
+    getProxyUrl(url) {
+        if (!url) return url;
+        // If it's already a proxy or local, skip
+        if (url.includes('api.vkeys.cn/v2/music/proxy') || url.includes('localhost') || url.includes('127.0.0.1')) return url;
+
+        // Use a known working proxy for music streams if possible
+        // For this project, we can try using the vkeys proxy if available, 
+        // or a generic one. Let's try to detect if we need it.
+        const needProxy = url.includes('migu.cn') || url.includes('music.126.net') || url.includes('qq.com') || url.includes('kuwo.cn');
+
+        if (needProxy) {
+            // Using a common proxy strategy for Meting/Music
+            return `https://api.vkeys.cn/v2/music/proxy?url=${encodeURIComponent(url)}`;
+        }
+        return url;
+    },
+
     async search(keyword, source, page = 1, limit = 20) {
         if (!keyword) return [];
 
@@ -156,68 +173,139 @@ const MusicAPI = {
 
             // 2. Meting Fallback for URL or missing data
             if (!track.url || track.url.includes('meting')) {
-                let songId = track.songId || (track.id.includes('-') ? track.id.split('-')[1] : track.id);
+                let songId = track.songId || (track.id && track.id.includes('-') ? track.id.split('-')[1] : track.id);
                 let server = track.source === 'qq' ? 'tencent' : track.source;
 
-                const tryMeting = async (baseUrl) => {
-                    try {
-                        const res = await fetch(`${baseUrl}?type=song&id=${songId}&server=${server}`);
-                        const data = await res.json();
-                        return data && data[0] ? data[0] : null;
-                    } catch (e) { return null; }
-                };
+                // Check if songId is invalid (idx-based, non-numeric, or 'undefined')
+                const isInvalidId = !songId || songId === 'undefined' || songId.startsWith('idx') || !/^\d+$/.test(songId);
 
-                // Prioritize qijieya for Netease as it proved better for full versions
-                let providers = [
-                    'https://api.qijieya.cn/meting/',
-                    'https://api.injahow.cn/meting/',
-                    'https://api.wuenci.com/meting/api/'
-                ];
+                // Try meting by ID first (if ID is valid)
+                if (!isInvalidId) {
+                    const tryMeting = async (baseUrl) => {
+                        try {
+                            const res = await fetch(`${baseUrl}?type=song&id=${songId}&server=${server}`);
+                            const data = await res.json();
+                            return data && data[0] ? data[0] : null;
+                        } catch (e) { return null; }
+                    };
 
-                // If it's not netease, maybe keep the original order or just try all
-                if (track.source !== 'netease') {
-                    providers = [
-                        'https://api.injahow.cn/meting/',
+                    let providers = [
                         'https://api.qijieya.cn/meting/',
+                        'https://api.injahow.cn/meting/',
                         'https://api.wuenci.com/meting/api/'
                     ];
+
+                    if (track.source !== 'netease') {
+                        providers = [
+                            'https://api.injahow.cn/meting/',
+                            'https://api.qijieya.cn/meting/',
+                            'https://api.wuenci.com/meting/api/'
+                        ];
+                    }
+
+                    for (const baseUrl of providers) {
+                        const data = await tryMeting(baseUrl);
+                        if (data && data.url) {
+                            track.url = data.url;
+                            track.cover = data.pic || track.cover;
+                            if (!track.lrc || track.lrc.includes('meting') || track.lrc.startsWith('http')) {
+                                track.lrc = data.lrc || track.lrc;
+                            }
+                            break;
+                        }
+                    }
                 }
 
-                let data = null;
-                for (const baseUrl of providers) {
-                    data = await tryMeting(baseUrl);
-                    // Minimal check: if netease and url has 'mobi' or looks like a 30s preview (very rare to detect easily without more API info)
-                    // But if we got a link, we check if it's usable.
-                    if (data && data.url) break;
-                }
+                // 3. ULTIMATE FALLBACK: Search by title + artist if still no URL
+                if (!track.url && track.title) {
+                    console.log("Using search fallback for:", track.title);
+                    const searchKeyword = `${track.title} ${track.artist || ''}`.trim();
+                    try {
+                        const searchResults = await this.search(searchKeyword, track.source, 1, 5);
+                        if (searchResults && searchResults.length > 0) {
+                            // Find best match by title similarity
+                            const titleLower = track.title.toLowerCase();
+                            const match = searchResults.find(s =>
+                                s.title && (s.title.toLowerCase().includes(titleLower) ||
+                                    titleLower.includes(s.title.toLowerCase()))
+                            ) || searchResults[0];
 
-                if (data) {
-                    track.url = data.url || track.url;
-                    track.cover = data.pic || track.cover;
-                    if (!track.lrc || track.lrc.includes('meting') || track.lrc.startsWith('http')) {
-                        track.lrc = data.lrc || track.lrc;
+                            if (match) {
+                                console.log("Search match found:", match.title, "ID:", match.songId || match.id);
+
+                                // If match has URL directly, use it
+                                if (match.url) {
+                                    track.url = match.url;
+                                    track.cover = match.cover || track.cover;
+                                    track.lrc = match.lrc || track.lrc;
+                                    track.id = match.id;
+                                } else {
+                                    // Fetch URL via meting using match's songId
+                                    const matchSongId = match.songId || (match.id && match.id.includes('-') ? match.id.split('-')[1] : match.id);
+                                    const server = track.source === 'qq' ? 'tencent' : track.source;
+
+                                    const tryMeting = async (baseUrl) => {
+                                        try {
+                                            const res = await fetch(`${baseUrl}?type=song&id=${matchSongId}&server=${server}`);
+                                            const data = await res.json();
+                                            return data && data[0] ? data[0] : null;
+                                        } catch (e) { return null; }
+                                    };
+
+                                    const providers = [
+                                        'https://api.qijieya.cn/meting/',
+                                        'https://api.injahow.cn/meting/',
+                                        'https://api.wuenci.com/meting/api/'
+                                    ];
+
+                                    for (const baseUrl of providers) {
+                                        const data = await tryMeting(baseUrl);
+                                        if (data && data.url) {
+                                            track.url = data.url;
+                                            track.cover = data.pic || match.cover || track.cover;
+                                            track.lrc = data.lrc || track.lrc;
+                                            track.id = match.id; // Update ID for future plays
+                                            console.log("Search fallback got URL from meting");
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Search fallback failed:", e);
                     }
                 }
             }
 
+            // 3. Final Content Guard: Resolve LRC URL to text
+            if (typeof track.lrc === 'string' && track.lrc.startsWith('http')) {
+                track.lrc = await this.fetchLrcText(track.lrc);
+            }
         } catch (e) {
             console.error("Detail fetch error:", e);
         }
 
-        // 3. Final Content Guard: Resolve LRC URL to text
-        if (typeof track.lrc === 'string' && track.lrc.startsWith('http')) {
-            try {
-                const lrcRes = await fetch(track.lrc);
-                const lrcText = await lrcRes.text();
-                if (lrcText && (lrcText.includes('[') || lrcText.length > 20)) {
-                    track.lrc = lrcText;
-                }
-            } catch (e) {
-                console.warn("Failed to resolve lyric URL", e);
-            }
+        return track;
+    },
+
+    parsePlaylistUrl(url) {
+        if (!url) return null;
+        url = url.trim();
+
+        // Netease
+        if (url.includes('163.com')) {
+            const match = url.match(/[?&]id=(\d+)/);
+            if (match) return { source: 'netease', id: match[1] };
         }
 
-        return track;
+        // QQ
+        if (url.includes('qq.com') || url.includes('tencent')) {
+            const match = url.match(/[?&]id=([\d\w]+)/) || url.match(/playlist\/([\d\w]+)/);
+            if (match) return { source: 'qq', id: match[1] };
+        }
+
+        return null;
     },
 
     async getUserPlaylists(source, uid) {
@@ -252,17 +340,23 @@ const MusicAPI = {
 
         let data = await tryPl('https://api.injahow.cn/meting/');
         if (!data) data = await tryPl('https://api.wuenci.com/meting/api/');
-        if (data) {
-            return data.map(s => ({
-                id: `${server}-${s.id}`,
-                title: s.name,
-                artist: s.artist,
-                album: s.album,
-                cover: s.pic,
-                source: server,
-                url: s.url,
-                lrc: s.lrc
-            })).slice(0, 50);
+        if (!data) data = await tryPl('https://api.qijieya.cn/meting/');
+
+        if (data && data.length > 0) {
+            return data.map((s, index) => {
+                // Meting API may return id in different fields, use fallbacks
+                const songId = s.id || s.song_id || s.rid || s.musicId || `idx${index}`;
+                return {
+                    id: `${server}-${songId}`,
+                    title: s.name || s.title || '未知歌曲',
+                    artist: s.artist || s.singer || '未知歌手',
+                    album: s.album || '',
+                    cover: s.pic || s.cover || '',
+                    source: server,
+                    url: s.url || '',
+                    lrc: s.lrc || ''
+                };
+            }).filter(s => s.id && !s.id.includes('undefined')).slice(0, 50);
         }
         return [];
     },

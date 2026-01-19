@@ -1024,6 +1024,12 @@ body {
   background: #15b38a;
 }
 
+.dialog-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
 /* 通用按钮样式 (Add this) */
 .btn-primary {
   width: 100%;
@@ -1271,4 +1277,32 @@ body {
 [data-theme="dark"] .search-input-wrapper input {
   color: var(--text-main);
   background: var(--bg-content);
+}
+/* Tags */
+.source-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: rgba(0,0,0,0.05);
+  border-radius: 4px;
+  color: var(--text-sub);
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+[data-theme='dark'] .source-tag {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.manual-tag {
+  font-size: 10px;
+  padding: 2px 6px;
+  background: rgba(30, 207, 159, 0.1);
+  color: var(--primary-color);
+  border-radius: 4px;
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+[data-theme='dark'] .manual-tag {
+  background: rgba(30, 207, 159, 0.2);
 }

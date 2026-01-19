@@ -68,7 +68,61 @@ const DataService = {
         this.playlists = [];
     },
 
-    async syncPlatform(platform, link) {
+    async syncPlatform(platform, url) {
+        try {
+            const parsed = MusicAPI.parsePlaylistUrl(url);
+            if (!parsed) throw new Error("无法解析链接，请检查格式是否正确");
+
+            UI.showToast(`正在从${platform === 'qq' ? 'QQ' : '网易云'}获取歌单...`, 'info');
+
+            // Try to find a name from browser if possible, otherwise use a placeholder
+            // In a real app we might fetch the name from a meta endpoint
+            const name = "我的同步歌单";
+
+            const songs = await MusicAPI.getPlaylistSongs(parsed.source === 'qq' ? 'tencent' : 'netease', parsed.id);
+            if (!songs || songs.length === 0) throw new Error("无法获取歌曲列表或歌单为空");
+
+            const res = await fetch(`${API_BASE}/playlists/sync`, {
+                method: 'POST',
+                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform: parsed.source, externalId: parsed.id, name, songs })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '同步失败');
+
+            UI.showToast(`同步成功: ${data.count} 项更新`, 'success');
+            await this.fetchPlaylists(); // Refresh
+            return true;
+        } catch (e) {
+            console.error('Sync Error:', e);
+            UI.showToast(`同步失败: ${e.message}`, 'error');
+            return false;
+        }
+    },
+
+    /**
+     * Import playlists from external platforms
+     * @param {string} platform - Platform name (netease, qq, etc.)
+     * @param {string} externalId - External playlist ID
+     * @param {Array} playlists - Array of playlist objects with id, name, and tracks
+     * @returns {Object} Response with success status
+     */
+    async importPlaylists(platform, externalId, playlists) {
+        try {
+            const res = await fetch(`${API_BASE}/sync/import`, {
+                method: 'POST',
+                headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform, id: externalId, playlists })
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || '导入失败');
+            }
+            return { success: true, count: data.count, message: data.message };
+        } catch (e) {
+            console.error('Import Playlists Error:', e);
+            return { success: false, message: e.message };
+        }
     },
 
     // --- Favorites ---
@@ -98,6 +152,24 @@ const DataService = {
         } catch (e) {
             console.error('Add Favorite Error:', e);
             // Revert on error?
+        }
+    },
+
+    async addBatchFavorites(songs) {
+        // Optimistic update
+        this.favorites.push(...songs);
+        try {
+            const res = await fetch(`${API_BASE}/favorites/batch`, {
+                method: 'POST',
+                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ songs })
+            });
+            if (!res.ok) throw new Error('Batch favorites failed');
+            return true;
+        } catch (e) {
+            console.error('Batch Add Favorites Error:', e);
+            this.fetchFavorites();
+            throw e;
         }
     },
 
@@ -182,7 +254,7 @@ const DataService = {
     },
 
     async addSongToPlaylist(playlistId, song) {
-        // Ensure playlist exists in local cache, if not, fetch all
+        // ... (existing code omitted for brevity in chunk but I'll replace the block)
         let pl = this.playlists.find(p => p.id === playlistId);
         if (!pl) {
             await this.fetchPlaylists();
@@ -205,12 +277,10 @@ const DataService = {
                 body: JSON.stringify(song)
             });
             if (res.ok) {
-                // If the response contains the new track info (with UID), update it
                 const data = await res.json().catch(() => ({}));
                 if (data.uid) {
                     tempTrack.uid = data.uid;
                 }
-                // Also trigger a full refresh to be safe, but asynchronously
                 this.fetchPlaylists();
                 return true;
             }
@@ -219,8 +289,38 @@ const DataService = {
             throw new Error(data.error || 'Backend save failed');
         } catch (e) {
             console.error('Add Song to Playlist Error:', e);
-            // Revert optimistic update
             pl.tracks = pl.tracks.filter(t => t !== tempTrack);
+            throw e;
+        }
+    },
+
+    async addBatchSongsToPlaylist(playlistId, songs) {
+        let pl = this.playlists.find(p => p.id === playlistId);
+        if (!pl) {
+            await this.fetchPlaylists();
+            pl = this.playlists.find(p => p.id === playlistId);
+        }
+        if (!pl) throw new Error('Playlist not found');
+
+        // Filter duplicates
+        const newSongs = songs.filter(s => !pl.tracks.some(t => t.id === s.id));
+        if (newSongs.length === 0) return true;
+
+        // Optimistic
+        pl.tracks.push(...newSongs);
+
+        try {
+            const res = await fetch(`${API_BASE}/playlists/batch-songs`, {
+                method: 'POST',
+                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ playlistId, songs: newSongs })
+            });
+            if (!res.ok) throw new Error('Batch add songs failed');
+            this.fetchPlaylists();
+            return true;
+        } catch (e) {
+            console.error('Batch Add Songs Error:', e);
+            this.fetchPlaylists(); // Refresh to sync
             throw e;
         }
     },
