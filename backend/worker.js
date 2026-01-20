@@ -327,11 +327,13 @@ export default {
                         // Update name if changed? Maybe keep user's custom name if they renamed it? 
                         // Let's update name to reflect latest sync if needed, but usually we just keep ID.
                     } else {
-                        // Create New
-                        const name = pl.name;
+                        // Create New - add platform prefix
+                        const platformPrefixes = { netease: '网易:', qq: 'QQ:', kuwo: '酷我:' };
+                        const prefix = platformPrefixes[platform] || (platform + ':');
+                        const prefixedName = prefix + pl.name;
                         const res = await env.DB.prepare(
                             "INSERT INTO playlists (user_id, name, is_sync, platform, external_id, can_delete, created_at) VALUES (?, ?, 1, ?, ?, 1, ?)" // can_delete=1 now
-                        ).bind(userId, name, platform, pl.id, Date.now()).run();
+                        ).bind(userId, prefixedName, platform, pl.id, Date.now()).run();
                         plId = res.meta.last_row_id;
                     }
 
@@ -546,14 +548,23 @@ export default {
             // 1. Check if playlist exists
             let pl = await env.DB.prepare("SELECT * FROM playlists WHERE user_id = ? AND platform = ? AND external_id = ?").bind(userId, platform, externalId).first();
             let playlistId;
+
+            // Helper to get platform prefix
+            const getPlatformPrefix = (p) => {
+                if (p === 'netease') return '网易:';
+                if (p === 'qq') return 'QQ:';
+                if (p === 'kuwo') return '酷我:';
+                return p + ':';
+            };
+
             if (!pl) {
                 const res = await env.DB.prepare("INSERT INTO playlists (user_id, name, is_sync, platform, external_id, created_at) VALUES (?, ?, 1, ?, ?, ?)")
-                    .bind(userId, (platform === 'netease' ? '网易:' : 'QQ:') + name, platform, externalId, Date.now()).run();
+                    .bind(userId, getPlatformPrefix(platform) + name, platform, externalId, Date.now()).run();
                 playlistId = res.meta.last_row_id;
             } else {
                 playlistId = pl.id;
                 // Update name if changed (keep prefix)
-                const newPrefixedName = (platform === 'netease' ? '网易:' : 'QQ:') + name;
+                const newPrefixedName = getPlatformPrefix(platform) + name;
                 if (pl.name !== newPrefixedName) {
                     await env.DB.prepare("UPDATE playlists SET name = ? WHERE id = ?").bind(newPrefixedName, playlistId).run();
                 }

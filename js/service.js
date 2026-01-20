@@ -73,7 +73,8 @@ const DataService = {
             const parsed = MusicAPI.parsePlaylistUrl(url);
             if (!parsed) throw new Error("无法解析链接，请检查格式是否正确");
 
-            UI.showToast(`正在从${platform === 'qq' ? 'QQ' : '网易云'}获取歌单...`, 'info');
+            const platformNames = { netease: '网易云', qq: 'QQ', kuwo: '酷我' };
+            UI.showToast(`正在从${platformNames[platform] || platform}获取歌单...`, 'info');
 
             const result = await MusicAPI.getPlaylistSongs(parsed.source, parsed.id);
             if (!result || !result.tracks || result.tracks.length === 0) throw new Error("无法获取歌曲列表或歌单为空");

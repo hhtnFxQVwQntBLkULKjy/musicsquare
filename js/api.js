@@ -154,8 +154,9 @@ const MusicAPI = {
                 track.cover = track.cover || (track.originalData && track.originalData.pic) || '';
                 track.lrc = track.lrc || (track.originalData && track.originalData.lrc) || '';
             } else {
-                // Fallback: Only try high-quality formats (faster, less requests)
-                const qualities = ['flac24bit', 'flac'];
+                // Automatic quality degradation: try one by one (sequential, not parallel)
+                // flac24bit → flac → 320k → 128k
+                const qualities = ['flac24bit', 'flac', '320k', '128k'];
                 let detailData = null;
 
                 const sid = track.songId || (track.id && String(track.id).includes('-') ? String(track.id).split('-')[1] : track.id);
@@ -163,17 +164,34 @@ const MusicAPI = {
                 if (sid) {
                     for (const br of qualities) {
                         try {
-                            const url = `${this.endpoints.base}?source=${track.source}&id=${sid}&type=url&br=${br}`;
+                            const apiUrl = `${this.endpoints.base}?source=${track.source}&id=${sid}&type=url&br=${br}`;
                             const controller = new AbortController();
                             const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
-                            const res = await fetch(url, { signal: controller.signal });
+                            // For kuwo, don't follow redirects to avoid CORS issues
+                            const fetchOptions = {
+                                signal: controller.signal,
+                                redirect: track.source === 'kuwo' ? 'manual' : 'follow'
+                            };
+
+                            const res = await fetch(apiUrl, fetchOptions);
                             clearTimeout(timeoutId);
+
+                            // Handle redirect for kuwo - the API redirects to CDN URL
+                            if (track.source === 'kuwo' && (res.status === 301 || res.status === 302 || res.type === 'opaqueredirect')) {
+                                // For kuwo, use the API URL directly as it acts as a proxy
+                                detailData = { url: apiUrl };
+                                break;
+                            }
 
                             if (!res.ok) continue;
 
                             const text = await res.text();
-                            if (!text || text.startsWith('fLaC') || text.startsWith('ID3')) continue;
+                            if (!text || text.startsWith('fLaC') || text.startsWith('ID3')) {
+                                // It's a raw audio stream, use the API URL as the audio source
+                                detailData = { url: apiUrl };
+                                break;
+                            }
 
                             const json = JSON.parse(text);
                             if (json.code === 200 && json.data && json.data.url) {
@@ -183,6 +201,20 @@ const MusicAPI = {
                         } catch (e) {
                             if (e.name === 'AbortError') console.log('Request timeout for', br);
                             continue;
+                        }
+                    }
+
+                    // If we got URL but missing cover/lrc, fetch them separately
+                    if (detailData && sid) {
+                        // Fetch cover if missing
+                        if (!detailData.pic && !track.cover) {
+                            const picUrl = `${this.endpoints.base}?source=${track.source}&id=${sid}&type=pic`;
+                            track.cover = picUrl; // Use API as proxy for cover
+                        }
+                        // Fetch lyrics if missing
+                        if (!detailData.lrc && !track.lrc) {
+                            const lrcUrl = `${this.endpoints.base}?source=${track.source}&id=${sid}&type=lrc`;
+                            track.lrc = lrcUrl; // Will be fetched below
                         }
                     }
                 }
@@ -203,9 +235,13 @@ const MusicAPI = {
                 this.urlCache.set(cacheKey, { url: track.url, cover: track.cover, lrc: track.lrc });
             }
 
-            // If we have a lyric URL, fetch it (but don't block playback)
+            // If we have a lyric URL, fetch it synchronously for better UX
             if (typeof track.lrc === 'string' && track.lrc.startsWith('http')) {
-                this.fetchLrcText(track.lrc).then(text => { track.lrc = text; }).catch(() => { });
+                try {
+                    track.lrc = await this.fetchLrcText(track.lrc);
+                } catch (e) {
+                    console.warn('Failed to fetch lyrics:', e);
+                }
             }
         } catch (e) {
             console.error("Detail fetch error:", e);
