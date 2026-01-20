@@ -75,17 +75,18 @@ const DataService = {
 
             UI.showToast(`正在从${platform === 'qq' ? 'QQ' : '网易云'}获取歌单...`, 'info');
 
-            // Try to find a name from browser if possible, otherwise use a placeholder
-            // In a real app we might fetch the name from a meta endpoint
-            const name = "我的同步歌单";
-
-            const songs = await MusicAPI.getPlaylistSongs(parsed.source === 'qq' ? 'tencent' : 'netease', parsed.id);
-            if (!songs || songs.length === 0) throw new Error("无法获取歌曲列表或歌单为空");
+            const result = await MusicAPI.getPlaylistSongs(parsed.source, parsed.id);
+            if (!result || !result.tracks || result.tracks.length === 0) throw new Error("无法获取歌曲列表或歌单为空");
 
             const res = await fetch(`${API_BASE}/playlists/sync`, {
                 method: 'POST',
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ platform: parsed.source, externalId: parsed.id, name, songs })
+                body: JSON.stringify({
+                    platform: parsed.source,
+                    externalId: parsed.id,
+                    name: result.name || "我的同步歌单",
+                    songs: result.tracks.map(s => this.cleanSong(s))
+                })
             });
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || '同步失败');
@@ -100,6 +101,13 @@ const DataService = {
         }
     },
 
+    cleanSong(song) {
+        const clean = { ...song };
+        delete clean.url;
+        if (typeof clean.lrc === 'string' && clean.lrc.startsWith('http')) delete clean.lrc;
+        return clean;
+    },
+
     /**
      * Import playlists from external platforms
      * @param {string} platform - Platform name (netease, qq, etc.)
@@ -109,10 +117,16 @@ const DataService = {
      */
     async importPlaylists(platform, externalId, playlists) {
         try {
+            // Clean all track data before sending to backend
+            const cleanPlaylists = playlists.map(pl => ({
+                ...pl,
+                tracks: pl.tracks ? pl.tracks.map(s => this.cleanSong(s)) : []
+            }));
+
             const res = await fetch(`${API_BASE}/sync/import`, {
                 method: 'POST',
-                headers: { ...this.authHeader(), 'Content-Type': 'application/json' },
-                body: JSON.stringify({ platform, id: externalId, playlists })
+                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ platform, id: externalId, playlists: cleanPlaylists })
             });
             const data = await res.json();
             if (!res.ok) {
@@ -147,7 +161,7 @@ const DataService = {
             await fetch(`${API_BASE}/favorites`, {
                 method: 'POST',
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify(song)
+                body: JSON.stringify(this.cleanSong(song))
             });
         } catch (e) {
             console.error('Add Favorite Error:', e);
@@ -162,7 +176,7 @@ const DataService = {
             const res = await fetch(`${API_BASE}/favorites/batch`, {
                 method: 'POST',
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ songs })
+                body: JSON.stringify({ songs: songs.map(s => this.cleanSong(s)) })
             });
             if (!res.ok) throw new Error('Batch favorites failed');
             return true;
@@ -208,12 +222,12 @@ const DataService = {
         return this.playlists;
     },
 
-    async createPlaylist(name) {
+    async createPlaylist(name, tracks = []) {
         try {
             const res = await fetch(`${API_BASE}/playlists`, {
                 method: 'POST',
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name })
+                body: JSON.stringify({ name, songs: tracks.map(s => this.cleanSong(s)) })
             });
             if (res.ok) {
                 const pl = await res.json();
@@ -254,7 +268,6 @@ const DataService = {
     },
 
     async addSongToPlaylist(playlistId, song) {
-        // ... (existing code omitted for brevity in chunk but I'll replace the block)
         let pl = this.playlists.find(p => p.id === playlistId);
         if (!pl) {
             await this.fetchPlaylists();
@@ -274,7 +287,7 @@ const DataService = {
             const res = await fetch(`${API_BASE}/playlists/${playlistId}/songs`, {
                 method: 'POST',
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify(song)
+                body: JSON.stringify(this.cleanSong(song))
             });
             if (res.ok) {
                 const data = await res.json().catch(() => ({}));
@@ -313,10 +326,10 @@ const DataService = {
             const res = await fetch(`${API_BASE}/playlists/batch-songs`, {
                 method: 'POST',
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ playlistId, songs: newSongs })
+                body: JSON.stringify({ playlistId, songs: newSongs.map(s => this.cleanSong(s)) })
             });
             if (!res.ok) throw new Error('Batch add songs failed');
-            this.fetchPlaylists();
+            this.fetchPlaylists(); // Refresh to sync
             return true;
         } catch (e) {
             console.error('Batch Add Songs Error:', e);
@@ -356,7 +369,7 @@ const DataService = {
             await fetch(`${API_BASE}/history`, {
                 method: 'POST',
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify(song)
+                body: JSON.stringify(this.cleanSong(song))
             });
         } catch (e) { console.error('Add History Error:', e); }
     }

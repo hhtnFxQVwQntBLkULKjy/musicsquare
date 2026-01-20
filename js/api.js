@@ -1,30 +1,38 @@
 const MusicAPI = {
     // Configuration
-    sources: ['netease', 'qq', 'kuwo', 'migu'],
+    sources: ['netease', 'qq', 'kuwo'], // migu removed from active sources
 
     // API Endpoints
     endpoints: {
-        migu: 'https://api.xcvts.cn/api/music/migu',
-        netease: 'https://api.vkeys.cn/v2/music/netease',
-        qqkuwo: 'https://music-dl.sayqz.com/api',
-        meting: 'https://api.qijieya.cn/meting/',
+        base: 'https://music-dl.sayqz.com/api/',
     },
 
     searchCache: new Map(),
 
-    getProxyUrl(url) {
+    getProxyUrl(url, source = null) {
         if (!url) return url;
-        // If it's already a proxy or local, skip
-        if (url.includes('api.vkeys.cn/v2/music/proxy') || url.includes('localhost') || url.includes('127.0.0.1')) return url;
+        const PROXY_BASE = 'https://api.yexin.de5.net/api/proxy?url=';
 
-        // Use a known working proxy for music streams if possible
-        // For this project, we can try using the vkeys proxy if available, 
-        // or a generic one. Let's try to detect if we need it.
-        const needProxy = url.includes('migu.cn') || url.includes('music.126.net') || url.includes('qq.com') || url.includes('kuwo.cn');
+        if (url.startsWith(PROXY_BASE) ||
+            url.includes('localhost') ||
+            url.includes('127.0.0.1')) return url;
 
-        if (needProxy) {
-            // Using a common proxy strategy for Meting/Music
-            return `https://api.vkeys.cn/v2/music/proxy?url=${encodeURIComponent(url)}`;
+        // HTTPS netease CDN works without proxy
+        if (url.includes('music.126.net') && url.startsWith('https://')) {
+            return url;
+        }
+
+        // Check if URL needs proxy based on domain patterns
+        const needProxyByDomain = url.includes('126.net') ||
+            url.includes('qq.com') ||
+            url.includes('kuwo.cn') ||
+            url.includes('sycdn.kuwo.cn');
+
+        // Check if it's an API URL for kuwo source (these redirect to CORS-blocked CDN)
+        const isKuwoApiUrl = url.includes('source=kuwo') || source === 'kuwo';
+
+        if (needProxyByDomain || isKuwoApiUrl) {
+            return PROXY_BASE + encodeURIComponent(url);
         }
         return url;
     },
@@ -38,23 +46,42 @@ const MusicAPI = {
         }
 
         try {
-            let results = [];
-            switch (source) {
-                case 'migu':
-                    results = await this.searchMigu(keyword, page, limit);
-                    break;
-                case 'netease':
-                    results = await this.searchNetease(keyword, page, limit);
-                    break;
-                case 'qq':
-                case 'kuwo':
-                    results = await this.searchCommon(keyword, source, page, limit);
-                    break;
-                default:
-                    results = [];
+            const url = `${this.endpoints.base}?source=${source}&type=search&keyword=${encodeURIComponent(keyword)}&page=${page}&limit=${limit}`;
+            const res = await fetch(url);
+            const json = await res.json();
+
+            if (json.message && json.message.includes('重试次数过多')) {
+                const srcMap = { 'netease': '网易', 'qq': 'QQ', 'kuwo': '酷我' };
+                const srcName = srcMap[source] || source;
+                UI.showToast(`${srcName}音乐: 搜索过于频繁，请稍后再试`, 'warning');
+                return [];
             }
 
-            // Cache management: max 100 entries
+            if (json.code !== 200 || !json.data) return [];
+
+            const list = json.data.results || json.data.list || (Array.isArray(json.data) ? json.data : []);
+            if (!Array.isArray(list)) return [];
+
+            const results = list.map(item => {
+                const sid = String(item.id || item.songid || item.mid || '');
+                const src = item.platform || item.source || source;
+                return {
+                    id: `${src}-${sid}`,
+                    songId: sid,
+                    title: item.name || item.title || '未知歌曲',
+                    artist: item.artist || item.author || '未知歌手',
+                    album: item.album || item.albumname || '-',
+                    cover: item.pic || item.cover || item.image || '',
+                    source: src,
+                    duration: item.interval || item.duration || 0,
+                    quality: item.quality,
+                    types: item.types || [],
+                    url: item.url || '',  // Preserve URL from API
+                    lrc: item.lrc || '',  // Preserve lyrics from API
+                    originalData: item
+                };
+            }).filter(s => s.songId);
+
             if (this.searchCache.size > 100) {
                 const firstKey = this.searchCache.keys().next().value;
                 this.searchCache.delete(firstKey);
@@ -68,224 +95,121 @@ const MusicAPI = {
         }
     },
 
-    async searchMigu(keyword, page, limit) {
-        const url = `${this.endpoints.migu}?gm=${encodeURIComponent(keyword)}&n=&num=${limit}&type=json`;
-        const res = await fetch(url);
-        const json = await res.json();
+    async aggregateSearch(keyword) {
+        if (!keyword) return [];
+        try {
+            const url = `${this.endpoints.base}?type=aggregateSearch&keyword=${encodeURIComponent(keyword)}`;
+            const res = await fetch(url);
+            const json = await res.json();
 
-        if (json.code !== 200 || !Array.isArray(json.data)) return [];
+            const list = json.data.results || json.data.list || (Array.isArray(json.data) ? json.data : []);
+            if (!Array.isArray(list)) return [];
 
-        return json.data.map(item => ({
-            id: `migu-${item.title}-${item.singer}`,
-            miguId: item.n,
-            keyword: keyword,
-            title: item.title,
-            artist: item.singer,
-            album: '',
-            cover: item.cover,
-            source: 'migu',
-            duration: 0,
-            url: item.music_url || null,
-            lrc: item.lrc_url || null,
-            originalData: item
-        }));
+            return list.map(item => {
+                const sid = String(item.id || item.songid || item.mid || '');
+                const src = item.platform || item.source || 'netease';
+                return {
+                    id: `${src}-${sid}`,
+                    songId: sid,
+                    title: item.name || item.title || '未知歌曲',
+                    artist: item.artist || item.author || '未知歌手',
+                    album: item.album || '-',
+                    cover: item.pic || item.cover || '',
+                    source: src,
+                    duration: item.interval || item.duration || 0,
+                    quality: item.quality,
+                    types: item.types || [],
+                    url: item.url || '',
+                    lrc: item.lrc || '',
+                    originalData: item
+                };
+            }).filter(s => s.songId);
+        } catch (e) {
+            console.error(`Aggregate search error:`, e);
+            return [];
+        }
     },
 
-    async searchNetease(keyword, page, limit) {
-        const url = `${this.endpoints.netease}?word=${encodeURIComponent(keyword)}&page=${page}&num=${limit}`;
-        const res = await fetch(url);
-        const json = await res.json();
-
-        if (json.code !== 200 || !Array.isArray(json.data)) return [];
-
-        return json.data.map(item => ({
-            id: `netease-${item.id}`,
-            songId: item.id,
-            title: item.song,
-            artist: item.singer,
-            album: item.album,
-            cover: item.cover,
-            source: 'netease',
-            duration: item.interval || 0,
-            quality: item.quality,
-            originalData: item
-        }));
-    },
-
-    async searchCommon(keyword, source, page, limit) {
-        const url = `${this.endpoints.qqkuwo}?type=search&keyword=${encodeURIComponent(keyword)}&source=${source}&limit=${limit}&page=${page}`;
-        const res = await fetch(url);
-        const json = await res.json();
-
-        if (json.code !== 200 || !json.data || !Array.isArray(json.data.results)) return [];
-
-        return json.data.results.map(item => ({
-            id: `${source}-${item.id}`,
-            songId: item.id,
-            title: item.name,
-            artist: item.artist,
-            album: item.album,
-            cover: item.pic,
-            source: source,
-            url: item.url,
-            lrc: item.lrc_url || item.lrc,
-            originalData: item
-        }));
-    },
+    // URL cache to avoid repeated API requests
+    urlCache: new Map(),
 
     async getSongDetails(track) {
         try {
-            // 1. Specific Platform Handling
-            if (track.source === 'migu') {
-                const n = track.miguId || 1;
-                const kw = track.keyword || track.title;
-                const url = `${this.endpoints.migu}?gm=${encodeURIComponent(kw)}&n=${n}&num=20&type=json`;
-                const res = await fetch(url);
-                const json = await res.json();
-                if (json.code === 200) {
-                    track.url = json.music_url || track.url;
-                    track.lrc = json.lrc_url || track.lrc;
-                    track.cover = json.cover || track.cover;
-                }
-            } else if (track.source === 'netease') {
-                let songId = track.songId || (track.id.includes('-') ? track.id.split('-')[1] : track.id);
-                try {
-                    const lyricRes = await fetch(`https://api.vkeys.cn/v2/music/netease/lyric?id=${songId}`);
-                    const lyricData = await lyricRes.json();
-                    if (lyricData && lyricData.code === 200 && lyricData.data) {
-                        track.lrc = lyricData.data.lrc;
-                    }
-                } catch (e) { console.warn("Netease lyric fetch failed", e); }
-            } else if (track.source === 'kuwo') {
-                let songId = track.songId || (track.id.includes('-') ? track.id.split('-')[1] : track.id);
-                try {
-                    const kuwoApi = `https://kw-api.cenguigui.cn/?id=${songId}&type=song&level=zp&format=json`;
-                    const res = await fetch(kuwoApi);
-                    const j = await res.json();
-                    if (j && j.code === 200 && j.data) {
-                        track.url = j.data.url || track.url;
-                        track.lrc = j.data.lyric || track.lrc;
-                        track.cover = j.data.pic || track.cover;
-                        track.album = j.data.album || track.album;
-                    }
-                } catch (e) { console.warn("Kuwo detail fetch failed", e); }
+            // Check cache first
+            const cacheKey = `${track.source}-${track.songId || track.id}`;
+            if (this.urlCache.has(cacheKey)) {
+                const cached = this.urlCache.get(cacheKey);
+                track.url = cached.url;
+                track.cover = cached.cover || track.cover;
+                track.lrc = cached.lrc || track.lrc;
+                return track;
             }
 
-            // 2. Meting Fallback for URL or missing data
-            if (!track.url || track.url.includes('meting')) {
-                let songId = track.songId || (track.id && track.id.includes('-') ? track.id.split('-')[1] : track.id);
-                let server = track.source === 'qq' ? 'tencent' : track.source;
+            // Check if we already have a URL from the API response (originalData or direct)
+            let existingUrl = track.url || (track.originalData && track.originalData.url);
 
-                // Check if songId is invalid (idx-based, non-numeric, or 'undefined')
-                const isInvalidId = !songId || songId === 'undefined' || songId.startsWith('idx') || !/^\d+$/.test(songId);
+            // If we have an existing URL, use it directly (no need to try higher qualities)
+            if (existingUrl) {
+                track.url = this.getProxyUrl(existingUrl, track.source);
+                track.cover = track.cover || (track.originalData && track.originalData.pic) || '';
+                track.lrc = track.lrc || (track.originalData && track.originalData.lrc) || '';
+            } else {
+                // Fallback: Only try high-quality formats (faster, less requests)
+                const qualities = ['flac24bit', 'flac'];
+                let detailData = null;
 
-                // Try meting by ID first (if ID is valid)
-                if (!isInvalidId) {
-                    const tryMeting = async (baseUrl) => {
+                const sid = track.songId || (track.id && String(track.id).includes('-') ? String(track.id).split('-')[1] : track.id);
+
+                if (sid) {
+                    for (const br of qualities) {
                         try {
-                            const res = await fetch(`${baseUrl}?type=song&id=${songId}&server=${server}`);
-                            const data = await res.json();
-                            return data && data[0] ? data[0] : null;
-                        } catch (e) { return null; }
-                    };
+                            const url = `${this.endpoints.base}?source=${track.source}&id=${sid}&type=url&br=${br}`;
+                            const controller = new AbortController();
+                            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
-                    let providers = [
-                        'https://api.qijieya.cn/meting/',
-                        'https://api.injahow.cn/meting/',
-                        'https://api.wuenci.com/meting/api/'
-                    ];
+                            const res = await fetch(url, { signal: controller.signal });
+                            clearTimeout(timeoutId);
 
-                    if (track.source !== 'netease') {
-                        providers = [
-                            'https://api.injahow.cn/meting/',
-                            'https://api.qijieya.cn/meting/',
-                            'https://api.wuenci.com/meting/api/'
-                        ];
-                    }
+                            if (!res.ok) continue;
 
-                    for (const baseUrl of providers) {
-                        const data = await tryMeting(baseUrl);
-                        if (data && data.url) {
-                            track.url = data.url;
-                            track.cover = data.pic || track.cover;
-                            if (!track.lrc || track.lrc.includes('meting') || track.lrc.startsWith('http')) {
-                                track.lrc = data.lrc || track.lrc;
+                            const text = await res.text();
+                            if (!text || text.startsWith('fLaC') || text.startsWith('ID3')) continue;
+
+                            const json = JSON.parse(text);
+                            if (json.code === 200 && json.data && json.data.url) {
+                                detailData = json.data;
+                                break;
                             }
-                            break;
+                        } catch (e) {
+                            if (e.name === 'AbortError') console.log('Request timeout for', br);
+                            continue;
                         }
                     }
                 }
 
-                // 3. ULTIMATE FALLBACK: Search by title + artist if still no URL
-                if (!track.url && track.title) {
-                    console.log("Using search fallback for:", track.title);
-                    const searchKeyword = `${track.title} ${track.artist || ''}`.trim();
-                    try {
-                        const searchResults = await this.search(searchKeyword, track.source, 1, 5);
-                        if (searchResults && searchResults.length > 0) {
-                            // Find best match by title similarity
-                            const titleLower = track.title.toLowerCase();
-                            const match = searchResults.find(s =>
-                                s.title && (s.title.toLowerCase().includes(titleLower) ||
-                                    titleLower.includes(s.title.toLowerCase()))
-                            ) || searchResults[0];
-
-                            if (match) {
-                                console.log("Search match found:", match.title, "ID:", match.songId || match.id);
-
-                                // If match has URL directly, use it
-                                if (match.url) {
-                                    track.url = match.url;
-                                    track.cover = match.cover || track.cover;
-                                    track.lrc = match.lrc || track.lrc;
-                                    track.id = match.id;
-                                } else {
-                                    // Fetch URL via meting using match's songId
-                                    const matchSongId = match.songId || (match.id && match.id.includes('-') ? match.id.split('-')[1] : match.id);
-                                    const server = track.source === 'qq' ? 'tencent' : track.source;
-
-                                    const tryMeting = async (baseUrl) => {
-                                        try {
-                                            const res = await fetch(`${baseUrl}?type=song&id=${matchSongId}&server=${server}`);
-                                            const data = await res.json();
-                                            return data && data[0] ? data[0] : null;
-                                        } catch (e) { return null; }
-                                    };
-
-                                    const providers = [
-                                        'https://api.qijieya.cn/meting/',
-                                        'https://api.injahow.cn/meting/',
-                                        'https://api.wuenci.com/meting/api/'
-                                    ];
-
-                                    for (const baseUrl of providers) {
-                                        const data = await tryMeting(baseUrl);
-                                        if (data && data.url) {
-                                            track.url = data.url;
-                                            track.cover = data.pic || match.cover || track.cover;
-                                            track.lrc = data.lrc || track.lrc;
-                                            track.id = match.id; // Update ID for future plays
-                                            console.log("Search fallback got URL from meting");
-                                            break;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        console.warn("Search fallback failed:", e);
-                    }
+                if (detailData) {
+                    track.url = this.getProxyUrl(detailData.url, track.source);
+                    track.cover = detailData.pic || track.cover;
+                    track.lrc = detailData.lrc || track.lrc;
                 }
             }
 
-            // 3. Final Content Guard: Resolve LRC URL to text
+            // Cache the result if we have a URL
+            if (track.url) {
+                if (this.urlCache.size > 200) {
+                    const firstKey = this.urlCache.keys().next().value;
+                    this.urlCache.delete(firstKey);
+                }
+                this.urlCache.set(cacheKey, { url: track.url, cover: track.cover, lrc: track.lrc });
+            }
+
+            // If we have a lyric URL, fetch it (but don't block playback)
             if (typeof track.lrc === 'string' && track.lrc.startsWith('http')) {
-                track.lrc = await this.fetchLrcText(track.lrc);
+                this.fetchLrcText(track.lrc).then(text => { track.lrc = text; }).catch(() => { });
             }
         } catch (e) {
             console.error("Detail fetch error:", e);
         }
-
         return track;
     },
 
@@ -293,76 +217,117 @@ const MusicAPI = {
         if (!url) return null;
         url = url.trim();
 
-        // Netease
+        // Netease: https://y.music.163.com/m/playlist?id=6586246706
         if (url.includes('163.com')) {
             const match = url.match(/[?&]id=(\d+)/);
             if (match) return { source: 'netease', id: match[1] };
         }
 
-        // QQ
+        // QQ: https://i2.y.qq.com/n3/other/pages/details/playlist.html?id=3817475436
         if (url.includes('qq.com') || url.includes('tencent')) {
-            const match = url.match(/[?&]id=([\d\w]+)/) || url.match(/playlist\/([\d\w]+)/);
+            const match = url.match(/[?&]id=([\d\w]+)/);
             if (match) return { source: 'qq', id: match[1] };
+        }
+
+        // Kuwo: https://m.kuwo.cn/newh5app/playlist_detail/3026741014
+        if (url.includes('kuwo.cn')) {
+            const match = url.match(/playlist_detail\/(\d+)/);
+            if (match) return { source: 'kuwo', id: match[1] };
+        }
+
+        // Raw numeric ID fallback
+        if (/^\d+$/.test(url)) {
+            return { source: null, id: url };
         }
 
         return null;
     },
 
-    async getUserPlaylists(source, uid) {
-        const serverMap = { 'netease': 'netease', 'qq': 'tencent', 'migu': 'migu', 'kuwo': 'kuwo' };
-        const server = serverMap[source];
-        if (!server) return [];
+    async getPlaylistSongs(source, playlistId) {
+        try {
+            const url = `${this.endpoints.base}?source=${source}&id=${playlistId}&type=playlist`;
+            const res = await fetch(url);
+            const json = await res.json();
 
-        const tryUser = async (baseUrl) => {
-            try {
-                const res = await fetch(`${baseUrl}?type=user&id=${uid}&server=${server}`);
-                const data = await res.json();
-                return Array.isArray(data) ? data : null;
-            } catch (e) { return null; }
-        };
+            if (json.code === 200 && json.data) {
+                const list = json.data.list || json.data.results || (Array.isArray(json.data) ? json.data : []);
+                if (!Array.isArray(list)) return { name: '未知歌单', tracks: [] };
 
-        let data = await tryUser('https://api.injahow.cn/meting/');
-        if (!data) data = await tryUser('https://api.wuenci.com/meting/api/');
-        if (!data) data = await tryUser('https://api.qijieya.cn/meting/');
-
-        if (!data) throw new Error('无法获取歌单');
-        return data.slice(0, 20);
+                return {
+                    name: (json.data.info && json.data.info.name) ? json.data.info.name : '未知歌单',
+                    tracks: list.map(s => {
+                        const sid = String(s.id || s.songid || s.mid || '');
+                        const src = s.platform || s.source || source;
+                        return {
+                            id: `${src}-${sid}`,
+                            songId: sid,
+                            title: s.name || s.title || '未知歌曲',
+                            artist: s.artist || s.author || '未知歌手',
+                            album: s.album || '-',
+                            cover: s.pic || s.cover || '',
+                            source: src,
+                            url: s.url || '',
+                            lrc: s.lrc || '',
+                            types: s.types || []
+                        };
+                    }).filter(s => s.songId)
+                };
+            }
+        } catch (e) {
+            console.error("Playlist songs fetch error:", e);
+        }
+        return { name: '未知歌单', tracks: [] };
     },
 
-    async getPlaylistSongs(server, playlistId) {
-        const tryPl = async (baseUrl) => {
-            try {
-                const res = await fetch(`${baseUrl}?type=playlist&id=${playlistId}&server=${server}`);
-                const data = await res.json();
-                return Array.isArray(data) ? data : null;
-            } catch (e) { return null; }
-        };
-
-        let data = await tryPl('https://api.injahow.cn/meting/');
-        if (!data) data = await tryPl('https://api.wuenci.com/meting/api/');
-        if (!data) data = await tryPl('https://api.qijieya.cn/meting/');
-
-        if (data && data.length > 0) {
-            return data.map((s, index) => {
-                // Meting API may return id in different fields, use fallbacks
-                const songId = s.id || s.song_id || s.rid || s.musicId || `idx${index}`;
-                return {
-                    id: `${server}-${songId}`,
-                    title: s.name || s.title || '未知歌曲',
-                    artist: s.artist || s.singer || '未知歌手',
-                    album: s.album || '',
-                    cover: s.pic || s.cover || '',
-                    source: server,
-                    url: s.url || '',
-                    lrc: s.lrc || ''
-                };
-            }).filter(s => s.id && !s.id.includes('undefined')).slice(0, 50);
+    async getBillboardList(source) {
+        try {
+            const url = `${this.endpoints.base}?source=${source}&type=toplists`;
+            const res = await fetch(url);
+            const json = await res.json();
+            if (json.code === 200 && json.data) {
+                const list = json.data.list || json.data.results || (Array.isArray(json.data) ? json.data : []);
+                return list.map(item => ({
+                    id: item.id || item.uid,
+                    name: item.name || item.title || '未知榜单',
+                    pic: item.pic || item.cover || item.image || '',
+                    updateFrequency: item.updateFrequency || ''
+                }));
+            }
+        } catch (e) {
+            console.error("Billboard list fetch error:", e);
         }
         return [];
     },
 
-    async getPlaylistInfo(server, playlistId) {
-        return null;
+    async getBillboardDetail(source, id) {
+        try {
+            // Use type=toplist for billboard detail (not toplists)
+            const url = `${this.endpoints.base}?type=toplist&source=${source}&id=${id}`;
+            const res = await fetch(url);
+            const json = await res.json();
+            if (json.code === 200 && json.data) {
+                const list = json.data.list || json.data.results || json.data.songs || (Array.isArray(json.data) ? json.data : []);
+                if (!Array.isArray(list)) return [];
+
+                return list.map(s => {
+                    const sid = String(s.id || s.songid || s.mid || '');
+                    return {
+                        id: `${source}-${sid}`,
+                        songId: sid,
+                        title: s.name || s.title || '未知歌曲',
+                        artist: s.artist || s.author || '未知歌手',
+                        album: s.album || '-',
+                        cover: s.pic || '',
+                        source: source,
+                        url: s.url || '',
+                        lrc: s.lrc || ''
+                    };
+                }).filter(s => s.songId);
+            }
+        } catch (e) {
+            console.error("Billboard detail fetch error:", e);
+        }
+        return [];
     },
 
     async fetchLrcText(lrcUrl) {
@@ -385,6 +350,10 @@ const MusicAPI = {
                 console.warn(`Lyric proxy failed: ${proxyUrl}`, e);
             }
         }
-        return lrcUrl; // Fallback to raw URL if all fail
-    }
+        return lrcUrl;
+    },
+
+    // Compatibility methods - all now go through common search
+    async searchNetease(keyword, page, limit) { return this.search(keyword, 'netease', page, limit); },
+    async searchCommon(keyword, source, page, limit) { return this.search(keyword, source, page, limit); }
 };

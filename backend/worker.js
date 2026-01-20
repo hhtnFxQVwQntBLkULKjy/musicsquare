@@ -343,7 +343,13 @@ export default {
                         const tracks = pl.tracks;
                         for (let i = 0; i < tracks.length; i += 10) {
                             const chunk = tracks.slice(i, i + 10);
-                            const batch = chunk.map(s => stmt.bind(plId, JSON.stringify(s), Date.now()));
+                            const batch = chunk.map(s => {
+                                // Strip temporary/unreliable URL/Lrc fields before saving
+                                const cleanSong = { ...s };
+                                delete cleanSong.url;
+                                if (typeof cleanSong.lrc === 'string' && cleanSong.lrc.startsWith('http')) delete cleanSong.lrc;
+                                return stmt.bind(plId, JSON.stringify(cleanSong), Date.now());
+                            });
                             await env.DB.batch(batch);
                         }
                     }
@@ -378,7 +384,7 @@ export default {
                 const serverMap = {
                     'netease': 'netease',
                     'qq': 'tencent',
-                    'migu': 'migu',
+                    // 'migu': 'migu', // Migu disabled
                     'kuwo': 'kuwo'
                 };
                 const serverCode = serverMap[platform];
@@ -431,7 +437,7 @@ export default {
                 const platformNames = {
                     'netease': '网易',
                     'qq': 'QQ',
-                    'migu': '咪咕',
+                    // 'migu': '咪咕', // Migu disabled
                     'kuwo': '酷我'
                 };
                 const prefix = platformNames[platform] || platform;
@@ -784,6 +790,91 @@ export default {
 
             await env.DB.prepare("INSERT INTO play_history (user_id, song_json, played_at) VALUES (?, ?, ?)").bind(userId, JSON.stringify(song), Date.now()).run();
             return json({ success: true });
+        }
+
+        // 9. Audio Proxy (CORS Bypass) with Caching
+        if (path === "/api/proxy" && request.method === "GET") {
+            try {
+                const targetUrl = url.searchParams.get("url");
+                if (!targetUrl) return error("Missing target url");
+
+                // Use Cloudflare Cache API for better performance
+                const cache = caches.default;
+                const cacheKey = new Request(request.url, request);
+
+                // Try to get cached response first
+                let cachedResponse = await cache.match(cacheKey);
+                if (cachedResponse) {
+                    // Return cached response with CORS headers
+                    const newHeaders = new Headers(cachedResponse.headers);
+                    newHeaders.set("Access-Control-Allow-Origin", "*");
+                    newHeaders.set("X-Cache", "HIT");
+                    return new Response(cachedResponse.body, {
+                        status: cachedResponse.status,
+                        headers: newHeaders
+                    });
+                }
+
+                // Fetch from origin
+                const res = await fetch(targetUrl, {
+                    headers: {
+                        "User-Agent": request.headers.get("User-Agent") || "Mozilla/5.0",
+                        "Referer": new URL(targetUrl).origin
+                    }
+                });
+
+                // Only cache successful responses
+                if (res.ok) {
+                    // Clone response for caching
+                    const responseToCache = res.clone();
+
+                    // Get original headers and inject CORS + cache control
+                    const newHeaders = new Headers(res.headers);
+                    newHeaders.set("Access-Control-Allow-Origin", "*");
+                    newHeaders.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+                    newHeaders.set("Cache-Control", "public, max-age=3600"); // 1 hour cache
+                    newHeaders.set("X-Cache", "MISS");
+                    newHeaders.delete("set-cookie");
+
+                    const finalResponse = new Response(res.body, {
+                        status: res.status,
+                        statusText: res.statusText,
+                        headers: newHeaders
+                    });
+
+                    // Store in cache (don't await, fire and forget)
+                    const cacheHeaders = new Headers(responseToCache.headers);
+                    cacheHeaders.set("Cache-Control", "public, max-age=3600");
+                    cacheHeaders.delete("set-cookie");
+
+                    const cacheableResponse = new Response(responseToCache.body, {
+                        status: responseToCache.status,
+                        headers: cacheHeaders
+                    });
+
+                    // Use waitUntil if available (in event context)
+                    try {
+                        cache.put(cacheKey, cacheableResponse);
+                    } catch (e) {
+                        // Ignore cache errors
+                    }
+
+                    return finalResponse;
+                }
+
+                // Non-OK response, return as-is with CORS
+                const newHeaders = new Headers(res.headers);
+                newHeaders.set("Access-Control-Allow-Origin", "*");
+                newHeaders.delete("set-cookie");
+
+                return new Response(res.body, {
+                    status: res.status,
+                    statusText: res.statusText,
+                    headers: newHeaders
+                });
+            } catch (e) {
+                return error("Proxy failed: " + e.message, 500);
+            }
         }
 
         return error("Not Found", 404);

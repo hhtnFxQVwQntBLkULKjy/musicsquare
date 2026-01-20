@@ -9,6 +9,7 @@ class MusicPlayer {
         this.lyrics = [];
         this.lyricIndex = -1;
         this.loadingTimer = null;
+        this._lastErrorTime = 0; // 报错截流
 
         // Audio Effects State
         this.audioCtx = null;
@@ -70,21 +71,21 @@ class MusicPlayer {
             }
             UI.clearLoadingToasts();
 
-            const currentTrack = this.playlist[this.currentIndex];
-            if (currentTrack) {
-                currentTrack.unplayable = true;
-                if (UI.renderSongList) {
-                    UI.renderSongList(this.playlist, 1, 1, null, true, UI._currentViewType, UI._currentPlaylistId);
-                }
+            // 报错截流：2.5秒内不重复弹窗
+            const now = Date.now();
+            if (now - this._lastErrorTime > 2500) {
+                UI.hideLoadingLock(); // 报错前先关闭遮罩，确保互斥
+                UI.showToast('该歌曲暂无法提供播放，欢迎您到正版音乐平台收听或下载。', 'error');
+                this._lastErrorTime = now;
+            } else {
+                UI.hideLoadingLock();
             }
-            UI.showToast('该歌曲暂无法提供播放，欢迎您到正版音乐平台收听或下载。', 'error');
 
             // Auto-retry logic for expired URLs
             if (this.currentTrack && !this.currentTrack._retried) {
                 this.currentTrack._retried = true;
                 console.log("Retrying playback with fresh URL...", this.currentTrack.title);
                 try {
-                    // Temporarily fail the URL to force refresh if logic depends on it
                     this.currentTrack.url = null;
                     const detail = await MusicAPI.getSongDetails(this.currentTrack);
                     if (detail && detail.url) {
@@ -94,10 +95,6 @@ class MusicPlayer {
                         return;
                     }
                 } catch (err) { console.error("Retry failed", err); }
-            }
-
-            if (this.playlist.length > 1) {
-                setTimeout(() => this.playNext(true), 1500);
             }
         });
     }
@@ -165,14 +162,15 @@ class MusicPlayer {
     async play(track, isFromHistory = false, playlist = null) {
         if (!track) {
             if (this.loadingTimer) clearTimeout(this.loadingTimer);
+            UI.hideLoadingLock();
             return;
         }
 
-        // 0.9秒后仍未播放则显示加载提示
+        // 锁定 UI，防止加载期间重复点击
+        UI.showLoadingLock();
+
         if (this.loadingTimer) clearTimeout(this.loadingTimer);
-        this.loadingTimer = setTimeout(() => {
-            UI.showToast('正在加载歌曲资源...', 'info');
-        }, 900);
+        // 移除 0.9s 的 loading toast，因为已经有了全局锁定遮罩
 
         if (playlist) this.playlist = playlist;
 
@@ -191,68 +189,44 @@ class MusicPlayer {
             }
         }
 
-        // On-demand search for imported tracks
-        if (track.isImported && !track.url) {
-            UI.showToast(`正在搜索音源: ${track.title}...`, 'success');
-            try {
-                // Extract original title (remove platform suffix)
-                const originalTitle = track.title.split(' (')[0];
-                const searchResults = await MusicAPI.search(`${originalTitle} ${track.artist}`, track.source);
-
-                // Find exact match (title and artist)
-                const match = searchResults.find(s =>
-                    s.title.toLowerCase().trim() === originalTitle.toLowerCase().trim() &&
-                    s.artist.toLowerCase().trim() === track.artist.toLowerCase().trim()
-                );
-
-                if (match) {
-                    const detail = await MusicAPI.getSongDetails(match);
-                    if (detail && detail.url) {
-                        // Update track with resolved data (but keep it as imported for future)
-                        track.url = detail.url;
-                        track.lrc = detail.lrc;
-                        track.cover = detail.cover;
-                        track.album = detail.album || track.album;
-                        track.songId = detail.songId || detail.id;
-                    } else {
-                        throw new Error("Match found but no URL available");
-                    }
-                } else {
-                    throw new Error("No exact match found in search results");
-                }
-            } catch (err) {
-                console.error("On-demand search failed", err);
-                track.unplayable = true;
-                UI.showToast(`歌曲无法播放: ${track.title}`, 'error');
-                // Force UI Update to show gray out
-                const idx = this.playlist.findIndex(t => t.id === track.id || t.uid === track.uid);
-                if (idx !== -1) UI.renderSongList(this.playlist, 1, 1, null, true, UI._currentViewType, UI._currentPlaylistId);
-
-                // Auto skip to next
-                setTimeout(() => this.playNext(true), 1500);
-                return;
-            }
-        }
-
         // Ensure details (url & lrc) are loaded content-wise
-        const lrcIsUrl = typeof track.lrc === 'string' && track.lrc.startsWith('http');
-        if (!track.url || !track.lrc || lrcIsUrl) {
-            // Force fetch details if missing URL OR if lrc is still a URL
+        if (!track.url || !track.lrc || (typeof track.lrc === 'string' && track.lrc.startsWith('http'))) {
             try {
                 const detail = await MusicAPI.getSongDetails(track);
-                // Merge detail back to track object to preserve original props if needed
-                if (detail) {
-                    track.url = detail.url || track.url;
-                    track.lrc = detail.lrc || track.lrc;
+                if (detail && detail.url) {
+                    track.url = detail.url;
+                    track.lrc = detail.lrc;
                     track.cover = detail.cover || track.cover;
+                } else if (!track.url) {
+                    // Fallback to search if no URL found and it's an imported/legacy track
+                    console.log("Detail fetch found no URL, trying search fallback for:", track.title);
+                    const originalTitle = track.title.split(' (')[0].trim();
+                    const searchResults = await MusicAPI.search(originalTitle, track.source, 1, 5);
+                    const targetArtist = (track.artist || "").toLowerCase().trim();
+                    const match = searchResults.find(s => {
+                        const sTitle = s.title.toLowerCase().trim();
+                        const sArtist = (s.artist || "").toLowerCase().trim();
+                        return (sTitle.includes(originalTitle.toLowerCase()) || originalTitle.toLowerCase().includes(sTitle)) &&
+                            (sArtist === targetArtist || sArtist.includes(targetArtist) || targetArtist.includes(sArtist));
+                    });
+                    if (match) {
+                        const mDetail = await MusicAPI.getSongDetails(match);
+                        if (mDetail && mDetail.url) {
+                            track.url = mDetail.url;
+                            track.lrc = mDetail.lrc;
+                            track.cover = mDetail.cover;
+                        }
+                    }
                 }
             } catch (e) {
-                console.warn("Detail fetch failed in player.play", e);
+                console.warn("Detail fetch/fallback failed in player.play", e);
             }
         }
 
         if (!track.url) {
             console.error("No URL for track", track);
+            UI.hideLoadingLock(); // 先关闭遮罩
+            UI.showToast('无法获取音频地址', 'error'); // 再报错，确保互斥
             return;
         }
 
@@ -283,15 +257,15 @@ class MusicPlayer {
         const bar = document.getElementById('player-bar');
         if (bar) {
             bar.style.transform = 'translateY(0)';
-            // Ensure z-index is high enough if hidden by something
             bar.style.zIndex = '100';
-        } else {
-            console.error('Player bar element not found!');
         }
 
         try {
             await this.audio.play();
             this.currentTrack = track;
+
+            // 成功播放后解除锁定
+            UI.hideLoadingLock();
 
             // Sync playlist index if track is in current playlist
             const idx = this.playlist.findIndex(t => t.id === track.id);
@@ -301,8 +275,8 @@ class MusicPlayer {
             }
         } catch (e) {
             console.error("Play failed", e);
-            // If play fails (e.g. not allowed without interaction), UI should still update
             this.currentTrack = track;
+            UI.hideLoadingLock(); // 确保报错截流处也优先关闭锁
         }
     }
 
@@ -402,8 +376,12 @@ class MusicPlayer {
         this.play(this.playlist[prevIndex]);
     }
 
-    setPlaylist(list, startIndex = 0) {
+    setPlaylist(list, startIndex = 0, targetId = null) {
         this.playlist = list;
+        if (targetId) {
+            const idx = this.playlist.findIndex(s => s.id == targetId || s.uid == targetId);
+            if (idx !== -1) startIndex = idx;
+        }
         this.currentIndex = startIndex;
         this.play(this.playlist[this.currentIndex]);
     }
