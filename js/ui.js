@@ -922,7 +922,7 @@ const UI = {
                     window.player.setPlaylist(window.appState ? window.appState.currentListData : songs, -1, song.id || song.uid);
                 }
             };
-            if (window.player && window.player.currentTrack && (window.player.currentTrack.id === song.id || (song.uid && window.player.currentTrack.uid === song.uid))) div.classList.add('playing');
+            if (window.player && window.player.currentTrack && (String(window.player.currentTrack.id) == String(song.id) || (song.uid && String(window.player.currentTrack.uid) == String(song.uid)))) div.classList.add('playing');
             if (song.unplayable) div.classList.add('unplayable');
 
             const isFav = DataService.isFavorite(song);
@@ -1051,21 +1051,30 @@ const UI = {
     },
 
     highlightPlayingByID(id, uid) {
-        if (!id && !uid) return;
-        // Only highlight within the current song list container to avoid multiple highlights
+        if (!id && !uid) return false;
         const container = this.songListContainer || document;
         const items = container.querySelectorAll('.song-item');
         const sid = id ? String(id) : null;
         const suid = uid ? String(uid) : null;
+        let matchEl = null;
+
         items.forEach((el) => {
-            if ((sid && el.dataset.id === sid) || (suid && el.dataset.id === suid)) {
+            if ((sid && el.dataset.id == sid) || (suid && el.dataset.id == suid)) {
                 el.classList.add('playing');
-                // Ensure it's scrolled into view if needed
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                matchEl = el;
             } else {
                 el.classList.remove('playing');
             }
         });
+
+        if (matchEl) {
+            // Small delay to ensure layout is settled
+            setTimeout(() => {
+                matchEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 50);
+            return true;
+        }
+        return false;
     },
 
     highlightPlaying(index) {

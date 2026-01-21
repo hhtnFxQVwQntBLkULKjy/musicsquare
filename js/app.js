@@ -247,11 +247,21 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
 
-        // Restore saved scroll position for the new view (after rendering)
-        // Use requestAnimationFrame to ensure DOM is ready
+        // Restore saved scroll position or auto-locate playing song
         requestAnimationFrame(() => {
             if (UI.contentView) {
-                UI.contentView.scrollTop = state.scrollPositions[viewName] || 0;
+                // Priority 1: If it's a view that might contain the playing song, try to locate it
+                if (window.player && window.player.currentTrack) {
+                    const found = UI.highlightPlayingByID(window.player.currentTrack.id, window.player.currentTrack.uid);
+                    if (found) return; // If found and scrolled, we are done
+                }
+
+                // Priority 2: Restore saved scroll position (with a small delay for async views)
+                setTimeout(() => {
+                    // Final check: if the song was rendered/found in the meantime, don't restore old scroll
+                    if (UI.songListContainer.querySelector('.song-item.playing')) return;
+                    UI.contentView.scrollTop = state.scrollPositions[viewName] || 0;
+                }, 100);
             }
         });
     }

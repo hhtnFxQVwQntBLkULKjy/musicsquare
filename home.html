@@ -508,7 +508,14 @@
 
         .song-item.playing {
             color: var(--primary-color);
-            background: rgba(30, 207, 159, 0.05);
+            background: rgba(30, 207, 159, 0.1);
+            font-weight: 600;
+            box-shadow: inset 3px 0 0 var(--primary-color);
+        }
+
+        .song-item.playing .col-index {
+            color: var(--primary-color);
+            font-weight: 800;
         }
 
         /* 歌曲操作栏优化 */
