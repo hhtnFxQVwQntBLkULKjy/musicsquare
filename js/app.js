@@ -31,7 +31,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // State
     const state = {
         currentView: 'search',
-        activeSources: ['netease'],
+        // Separate sources for search and hot views
+        searchActiveSources: ['netease'],  // For search - supports multi-source
+        hotActiveSource: 'netease',        // For hot - single source only
         isMultiSource: false,
         globalKeyword: '',
         searchPage: 1,
@@ -40,7 +42,13 @@ document.addEventListener('DOMContentLoaded', async () => {
         currentListData: [],
         hotSongsCache: {},
         selectedBillboardId: null,
-        isLoadingMore: false
+        isLoadingMore: false,
+        // Per-source billboard state for independent tabs
+        hotBillboardState: {
+            netease: { selectedBillboardId: null, listCache: null, detailCache: null, currentBillboardName: null },
+            qq: { selectedBillboardId: null, listCache: null, detailCache: null, currentBillboardName: null },
+            kuwo: { selectedBillboardId: null, listCache: null, detailCache: null, currentBillboardName: null }
+        }
     };
     window.appState = state; // 公开状态供 UI 层访问
 
@@ -86,8 +94,30 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- Core Logic ---
 
+    // View request ID to prevent race conditions when switching views quickly
+    let currentViewRequestId = 0;
+
+    // Listen for favorites update event
+    document.addEventListener('favorites-updated', async () => {
+        if (state.currentView === 'favorites') {
+            await DataService.fetchFavorites();
+            const favs = DataService.favorites;
+            state.currentListData = favs;
+            UI.renderSongList(favs, 1, 1, null, true, 'favorites');
+        }
+    });
+
     async function switchView(viewName, data = null) {
+        // Increment request ID to invalidate any pending async operations
+        const requestId = ++currentViewRequestId;
         state.currentView = viewName;
+
+        // Clear selection when switching views
+        UI.selectedSongs.clear();
+        UI.updateBatchBar();
+        document.querySelectorAll('.song-checkbox').forEach(c => c.checked = false);
+        const allCheck = document.getElementById('select-all-checkbox');
+        if (allCheck) allCheck.checked = false;
 
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
         const navItem = document.querySelector(`.nav-item[data-view="${viewName}"]`);
@@ -104,7 +134,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         if (viewName === 'hot') {
-            state.selectedBillboardId = null; // Reset selection to show grid
+            // Don't reset billboard selection - preserve per-source state
             if (searchContainer) {
                 searchContainer.style.display = 'flex';
                 searchContainer.style.visibility = 'visible';
@@ -116,11 +146,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (multiToggle) multiToggle.style.display = 'none';
             if (recContainer) recContainer.style.display = 'none';
 
-            if (state.activeSources.length > 1) {
-                state.activeSources = [state.activeSources[0]];
-                updateSourceChips();
-            }
+            // Hot view uses its own source
+            updateSourceChips();
         } else {
+            // Hide chart back button when not in hot view
+            UI.hideChartBackButton();
+
             const inputWrapper = document.querySelector('.search-input-wrapper');
             if (inputWrapper) inputWrapper.style.visibility = 'visible';
             if (searchBtn) searchBtn.style.visibility = 'visible';
@@ -133,6 +164,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (sourceControls) sourceControls.style.display = 'flex';
                 if (multiToggle) multiToggle.style.display = 'flex';
                 if (recContainer) recContainer.style.display = 'flex';
+                updateSourceChips();  // Show search sources
             } else {
                 if (searchContainer) {
                     searchContainer.style.display = 'flex';
@@ -149,6 +181,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 searchInput.placeholder = '搜索歌曲、歌手...';
             }
             if (state.globalResults.length > 0) {
+                state.currentListData = state.globalResults;  // Set currentListData for song clicks
                 UI.renderSongList(state.globalResults, 1, 1, () => {
                     loadNextPage();
                 }, false, 'search');
@@ -159,7 +192,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
         else if (viewName === 'hot') {
-            loadHotSongs(state.activeSources[0], state.hotPage);
+            // Load hot songs - uses hotActiveSource
+            loadHotSongs(state.hotActiveSource, 1);
         }
         else if (viewName === 'favorites') {
             if (searchInput) {
@@ -202,50 +236,79 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
-    async function loadHotSongs(source, page = 1, isAppend = false) {
+    async function loadHotSongs(source, page = 1, isAppend = false, forceRefresh = false) {
+        // Capture current request ID to detect if view changed during async operations
+        const thisRequestId = currentViewRequestId;
+
+        // Get per-source state
+        const sourceState = state.hotBillboardState[source] || { selectedBillboardId: null, listCache: null, detailCache: null };
+
         if (!isAppend) {
-            UI.showLoading();
-            if (UI.contentView) UI.contentView.scrollTop = 0;
             state.hotPage = 1;
         }
         state.hotPage = page;
         state.isLoadingMore = true;
         UI.setLoadingMore(true);
+
         try {
-            // First page: fetch billboard list and find the correct one
-            if (page === 1) {
-                const list = await MusicAPI.getBillboardList(source);
-                let targetNames = ['热歌榜'];
-                if (source === 'kuwo') targetNames = ['抖音热歌榜', '热歌榜'];
-
-                const target = list.find(item => targetNames.some(tn => item.name && item.name.includes(tn)));
-                if (target) {
-                    state.currentBillboardId = target.id;
-                } else {
-                    state.currentBillboardId = list[0] ? list[0].id : null;
+            // Case 1: No billboard selected - show grid list
+            if (!sourceState.selectedBillboardId) {
+                if (!isAppend) {
+                    UI.showLoading();
+                    if (UI.contentView) UI.contentView.scrollTop = 0;
                 }
-            }
 
-            // New logic: If we have multiple billboards and haven't selected one, show grid
-            if (page === 1 && !state.selectedBillboardId) {
-                const list = await MusicAPI.getBillboardList(source);
+                // Use cached list if available
+                let list = sourceState.listCache;
+                if (!list || forceRefresh) {
+                    list = await MusicAPI.getBillboardList(source);
+                    // Check if view changed during async operation
+                    if (thisRequestId !== currentViewRequestId) return;
+                    state.hotBillboardState[source].listCache = list;
+                }
+
+                // Check if view changed during async operation
+                if (thisRequestId !== currentViewRequestId) return;
+
+                // Render grid with back button hidden
+                UI.hideChartBackButton();
                 UI.renderToplistGrid(list, source, (target) => {
-                    state.selectedBillboardId = target.id;
+                    state.hotBillboardState[source].selectedBillboardId = target.id;
+                    state.hotBillboardState[source].currentBillboardName = target.name;
                     state.hotPage = 1;
                     loadHotSongs(source, 1);
                 });
                 return;
             }
 
-            const billboardId = state.selectedBillboardId || state.currentBillboardId;
+            // Case 2: Billboard selected - show detail
+            const billboardId = sourceState.selectedBillboardId;
 
-            if (!billboardId) {
-                UI.renderEmptyState('暂无榜单数据');
+            // Show back button when viewing detail
+            UI.showChartBackButton(sourceState.currentBillboardName || '榜单详情', () => {
+                // Clear selection and go back to list (keep listCache for speed)
+                state.hotBillboardState[source].selectedBillboardId = null;
+                loadHotSongs(source, 1);
+            });
+
+            // Use cached detail if available (unless appending or force refresh)
+            if (!isAppend && sourceState.detailCache && sourceState.detailCache.length > 0 && !forceRefresh) {
+                state.currentListData = sourceState.detailCache;
+                state.hotSongsCache[source] = sourceState.detailCache;
+                UI.renderSongList(sourceState.detailCache, 1, 1, () => { }, false, 'hot', null, false);
                 return;
             }
 
-            // Fetch detail
+            if (!isAppend) {
+                UI.showLoading();
+                if (UI.contentView) UI.contentView.scrollTop = 0;
+            }
+
+            // Fetch detail from API
             const res = await MusicAPI.getBillboardDetail(source, billboardId);
+
+            // Check if view changed during async operation
+            if (thisRequestId !== currentViewRequestId) return;
 
             const seenIds = new Set(isAppend ? (state.hotSongsCache[source] || []).map(s => s.id) : []);
             const actuallyNew = res.filter(item => {
@@ -261,8 +324,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     state.hotSongsCache[source] = actuallyNew;
                 }
                 state.currentListData = state.hotSongsCache[source];
+                state.hotBillboardState[source].detailCache = state.hotSongsCache[source];
                 UI.renderSongList(isAppend ? actuallyNew : state.hotSongsCache[source], 1, 1, () => {
-                    // Toplists are usually full lists, but if we wanted pagination we'd do it here
+                    // Toplists are usually full lists
                 }, false, 'hot', null, isAppend);
             } else {
                 if (!isAppend) UI.renderEmptyState('暂无热门歌曲');
@@ -293,6 +357,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     async function doGlobalSearch(isAppend = false) {
+        // Capture current request ID
+        const thisRequestId = currentViewRequestId;
+
         if (!isAppend) {
             UI.showLoading();
             state.globalResults = [];
@@ -304,17 +371,17 @@ document.addEventListener('DOMContentLoaded', async () => {
             let merged = [];
 
             // 如果是多源搜索且选择了 3 个源，调用聚合搜索接口
-            if (state.isMultiSource && state.activeSources.length === 3) {
+            if (state.isMultiSource && state.searchActiveSources.length === 3) {
                 merged = await MusicAPI.aggregateSearch(state.globalKeyword);
             } else {
                 // 如果是单源或 2 个源，分别调用
-                const promises = state.activeSources.map(source =>
+                const promises = state.searchActiveSources.map(source =>
                     MusicAPI.search(state.globalKeyword, source, state.searchPage)
                         .catch(e => [])
                 );
                 const results = await Promise.all(promises);
 
-                if (state.isMultiSource && state.activeSources.length === 2) {
+                if (state.isMultiSource && state.searchActiveSources.length === 2) {
                     // 两个就分别调用两个接口。排序显示：先选择的在上面，交替显示 (121212)
                     const maxLength = Math.max(...results.map(r => r.length));
                     for (let i = 0; i < maxLength; i++) {
@@ -327,6 +394,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                     merged = results[0] || [];
                 }
             }
+
+            // Check if view changed during async operation
+            if (thisRequestId !== currentViewRequestId) return;
 
             // 严格去重逻辑
             const seenIds = new Set(isAppend ? state.globalResults.map(s => s.id) : []);
@@ -366,7 +436,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             state.searchPage++;
             doGlobalSearch(true);
         } else if (state.currentView === 'hot') {
-            loadHotSongs(state.activeSources[0], state.hotPage + 1, true);
+            loadHotSongs(state.hotActiveSource, state.hotPage + 1, true);
         }
     }
 
@@ -422,11 +492,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 window.player.pause();
             }
 
-            if (!state.isMultiSource && state.activeSources.length > 1) {
-                state.activeSources = [state.activeSources[0]];
+            if (!state.isMultiSource && state.searchActiveSources.length > 1) {
+                state.searchActiveSources = [state.searchActiveSources[0]];
             }
 
-            const names = state.activeSources.map(s => getSourceDisplayName(s)).join(' 和 ');
+            const names = state.searchActiveSources.map(s => getSourceDisplayName(s)).join(' 和 ');
             UI.showToast(`已为您切换至 ${names}，播放已暂停`, 'info');
 
             updateSourceChips();
@@ -445,7 +515,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 if (window.player && typeof window.player.pause === 'function') {
                     window.player.pause();
                 }
-                state.activeSources = [source];
+                state.hotActiveSource = source;
                 state.hotPage = 1;
                 updateSourceChips();
                 loadHotSongs(source, 1);
@@ -454,31 +524,31 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
 
             if (state.isMultiSource) {
-                if (state.activeSources.includes(source)) {
-                    if (state.activeSources.length > 1) {
-                        state.activeSources = state.activeSources.filter(s => s !== source);
+                if (state.searchActiveSources.includes(source)) {
+                    if (state.searchActiveSources.length > 1) {
+                        state.searchActiveSources = state.searchActiveSources.filter(s => s !== source);
                     } else {
                         UI.showToast('请至少保留一个音源', 'warning');
                         return;
                     }
                 } else {
-                    state.activeSources.push(source);
+                    state.searchActiveSources.push(source);
                 }
 
                 if (window.player && typeof window.player.pause === 'function') {
                     window.player.pause();
                 }
 
-                const names = state.activeSources.map(s => getSourceDisplayName(s)).join(' 和 ');
+                const names = state.searchActiveSources.map(s => getSourceDisplayName(s)).join(' 和 ');
                 UI.showToast(`已为您切换至 ${names}，播放已暂停`, 'info');
             } else {
-                if (state.activeSources.length === 1 && state.activeSources[0] === source) return;
+                if (state.searchActiveSources.length === 1 && state.searchActiveSources[0] === source) return;
 
                 if (window.player && typeof window.player.pause === 'function') {
                     window.player.pause();
                 }
 
-                state.activeSources = [source];
+                state.searchActiveSources = [source];
                 UI.showToast(`已为您切换至 ${getSourceDisplayName(source)}，播放已暂停`, 'info');
             }
 
@@ -492,7 +562,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     function updateSourceChips() {
         sourceChips.forEach(c => {
-            if (state.activeSources.includes(c.dataset.source)) c.classList.add('active');
+            // Use appropriate source based on current view
+            const activeSources = state.currentView === 'hot'
+                ? [state.hotActiveSource]
+                : state.searchActiveSources;
+            if (activeSources.includes(c.dataset.source)) c.classList.add('active');
             else c.classList.remove('active');
         });
     }

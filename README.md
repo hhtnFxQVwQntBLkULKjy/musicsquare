@@ -8,6 +8,30 @@
 
 一款功能强大的在线音乐播放器，支持多平台音源聚合搜索与播放。
 
+## 🌐 在线体验
+
+👉 **[点击这里体验云端音乐](https://7tangdagui.github.io/musicsquare/)**
+
+## 📸 界面预览
+
+### 搜索页面
+![搜索页面](docs/screenshot_search.png)
+
+### 热门歌曲 - 网易云
+![热门歌曲-网易云](docs/screenshot_hot_netease.png)
+
+### 热门歌曲 - QQ音乐
+![热门歌曲-QQ音乐](docs/screenshot_hot_qq.png)
+
+### 热门歌曲 - 酷我音乐
+![热门歌曲-酷我音乐](docs/screenshot_hot_kuwo.png)
+
+### 播放历史
+![播放历史](docs/screenshot_history.png)
+
+### 我的收藏（批量操作）
+![我的收藏](docs/screenshot_favorites.png)
+
 ## ✨ 功能特色
 
 ### 🎵 多平台音源
@@ -30,7 +54,6 @@
 
 ### 🔄 歌单同步
 - **平台导入**：支持导入网易云、QQ音乐、酷我歌单
-- **扫码登录**：QQ音乐/网易云扫码快速同步
 - **增量更新**：智能识别新增歌曲
 
 ### 🎨 界面设计
@@ -107,7 +130,6 @@ musicsquare/
 - ✅ 多平台音源聚合（网易云、QQ、酷我）
 - ✅ 自动音质降级
 - ✅ 歌单同步导入
-- ✅ 扫码登录
 - ✅ 响应式设计
 - ✅ Cloudflare 边缘缓存加速
 

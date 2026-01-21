@@ -347,13 +347,18 @@ const MusicAPI = {
 
                 return list.map(s => {
                     const sid = String(s.id || s.songid || s.mid || '');
+                    // For Kuwo, use API proxy for cover images to bypass CORS
+                    let coverUrl = s.pic || '';
+                    if (source === 'kuwo' && sid) {
+                        coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
+                    }
                     return {
                         id: `${source}-${sid}`,
                         songId: sid,
                         title: s.name || s.title || '未知歌曲',
                         artist: s.artist || s.author || '未知歌手',
                         album: s.album || '-',
-                        cover: s.pic || '',
+                        cover: coverUrl,
                         source: source,
                         url: s.url || '',
                         lrc: s.lrc || ''

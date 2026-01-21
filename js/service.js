@@ -202,6 +202,27 @@ const DataService = {
         }
     },
 
+    async removeBatchFavorites(songs) {
+        // Optimistic update - remove all matching songs
+        const idsToRemove = songs.map(s => s.id || s.uid);
+        this.favorites = this.favorites.filter(s =>
+            !idsToRemove.includes(s.id) && !idsToRemove.includes(s.uid)
+        );
+        try {
+            const res = await fetch(`${API_BASE}/favorites/batch`, {
+                method: 'DELETE',
+                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: idsToRemove })
+            });
+            if (!res.ok) throw new Error('Batch remove favorites failed');
+            return true;
+        } catch (e) {
+            console.error('Batch Remove Favorites Error:', e);
+            this.fetchFavorites(); // Refresh on error
+            throw e;
+        }
+    },
+
     isFavorite(song) {
         if (!song) return false;
         // Check both ID types (local 'netease-123' vs backend stored)
@@ -355,6 +376,32 @@ const DataService = {
         }
     },
 
+    async removeBatchSongsFromPlaylist(playlistId, songs) {
+        const pl = this.playlists.find(p => p.id === playlistId);
+        if (!pl) return;
+
+        // Optimistic update - remove all matching songs
+        const uidsToRemove = songs.map(s => s.uid || s.id);
+        pl.tracks = pl.tracks.filter(t =>
+            !uidsToRemove.includes(t.uid) && !uidsToRemove.includes(t.id)
+        );
+
+        try {
+            const res = await fetch(`${API_BASE}/playlists/${playlistId}/songs/batch`, {
+                method: 'DELETE',
+                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uids: uidsToRemove })
+            });
+            if (!res.ok) throw new Error('Batch delete songs failed');
+            this.fetchPlaylists(); // Refresh to sync
+            return true;
+        } catch (e) {
+            console.error('Batch Remove Songs Error:', e);
+            this.fetchPlaylists(); // Refresh on error
+            throw e;
+        }
+    },
+
     async fetchHistory() {
         try {
             const res = await fetch(`${API_BASE}/history`, { headers: this.authHeader });
@@ -373,5 +420,21 @@ const DataService = {
                 body: JSON.stringify(this.cleanSong(song))
             });
         } catch (e) { console.error('Add History Error:', e); }
+    },
+
+    async removeBatchHistory(songs) {
+        const idsToRemove = songs.map(s => s.id || s.uid);
+        try {
+            const res = await fetch(`${API_BASE}/history/batch`, {
+                method: 'DELETE',
+                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: idsToRemove })
+            });
+            if (!res.ok) throw new Error('Batch remove history failed');
+            return true;
+        } catch (e) {
+            console.error('Batch Remove History Error:', e);
+            throw e;
+        }
     }
 };

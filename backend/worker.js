@@ -784,12 +784,50 @@ export default {
             return json({ success: true, count: batch.length });
         }
 
+        // Batch Delete Favorites
+        if (path === "/api/favorites/batch" && request.method === "DELETE") {
+            const userId = getUserId();
+            if (!userId) return error("Unauthorized", 401);
+            const { ids } = await request.json();
+            if (!Array.isArray(ids)) return error("Invalid data");
+
+            // Delete all matching songs (silently ignore non-existent)
+            for (const id of ids) {
+                await env.DB.prepare("DELETE FROM favorites WHERE user_id = ? AND json_extract(song_json, '$.id') = ?").bind(userId, id).run();
+            }
+            return json({ success: true, count: ids.length });
+        }
+
+        // Batch Delete Songs from Playlist
+        const batchDeleteSongsMatch = path.match(/^\/api\/playlists\/(\d+)\/songs\/batch$/);
+        if (batchDeleteSongsMatch && request.method === "DELETE") {
+            const userId = getUserId();
+            if (!userId) return error("Unauthorized", 401);
+            const plId = batchDeleteSongsMatch[1];
+            const { uids } = await request.json();
+            if (!Array.isArray(uids)) return error("Invalid data");
+
+            // Verify playlist ownership
+            const pl = await env.DB.prepare("SELECT * FROM playlists WHERE id = ?").bind(plId).first();
+            if (!pl || pl.user_id !== userId) return error("Forbidden", 403);
+
+            // Delete all matching songs by uid
+            for (const uid of uids) {
+                await env.DB.prepare("DELETE FROM playlist_songs WHERE playlist_id = ? AND id = ?").bind(plId, uid).run();
+            }
+            return json({ success: true, count: uids.length });
+        }
+
         // 8. Play History
         if (path === "/api/history" && request.method === "GET") {
             const userId = getUserId();
             if (!userId) return error("Unauthorized", 401);
-            const { results } = await env.DB.prepare("SELECT song_json FROM play_history WHERE user_id = ? ORDER BY played_at DESC LIMIT 100").bind(userId).all();
-            return json(results.map(r => JSON.parse(r.song_json)));
+            const { results } = await env.DB.prepare("SELECT id, song_json FROM play_history WHERE user_id = ? ORDER BY played_at DESC LIMIT 100").bind(userId).all();
+            return json(results.map(r => {
+                const song = JSON.parse(r.song_json);
+                song.uid = r.id;  // Add uid for deletion
+                return song;
+            }));
         }
         if (path === "/api/history" && request.method === "POST") {
             const userId = getUserId();
@@ -801,6 +839,20 @@ export default {
 
             await env.DB.prepare("INSERT INTO play_history (user_id, song_json, played_at) VALUES (?, ?, ?)").bind(userId, JSON.stringify(song), Date.now()).run();
             return json({ success: true });
+        }
+
+        // Batch Delete History
+        if (path === "/api/history/batch" && request.method === "DELETE") {
+            const userId = getUserId();
+            if (!userId) return error("Unauthorized", 401);
+            const { ids } = await request.json();
+            if (!Array.isArray(ids)) return error("Invalid data");
+
+            // Delete all matching history by song id
+            for (const id of ids) {
+                await env.DB.prepare("DELETE FROM play_history WHERE user_id = ? AND json_extract(song_json, '$.id') = ?").bind(userId, id).run();
+            }
+            return json({ success: true, count: ids.length });
         }
 
         // 9. Audio Proxy (CORS Bypass) with Caching
