@@ -428,7 +428,7 @@ const MusicAPI = {
                 return list.map(s => {
                     const sid = String(s.id || s.songid || s.mid || '');
                     // For Kuwo, use API proxy for cover images to bypass CORS
-                    let coverUrl = s.pic || '';
+                    let coverUrl = s.pic || s.cover || '';
                     if (source === 'kuwo') {
                         if (sid) {
                             coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;

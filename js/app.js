@@ -44,6 +44,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         hotSongsCache: {},
         selectedBillboardId: null,
         isLoadingMore: false,
+        // Per-view scroll positions to prevent scroll position leaking between views
+        scrollPositions: {},
         // Per-source billboard state for independent tabs
         hotBillboardState: {
             netease: { selectedBillboardId: null, listCache: null, detailCache: null, currentBillboardName: null },
@@ -114,6 +116,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     async function switchView(viewName, data = null) {
         // Increment request ID to invalidate any pending async operations
         const requestId = ++currentViewRequestId;
+
+        // Save current scroll position before switching views
+        if (state.currentView && UI.contentView) {
+            state.scrollPositions[state.currentView] = UI.contentView.scrollTop;
+        }
+
         state.currentView = viewName;
 
         // Clear selection when switching views
@@ -238,6 +246,14 @@ document.addEventListener('DOMContentLoaded', async () => {
                 UI.renderEmptyState('歌单为空');
             }
         }
+
+        // Restore saved scroll position for the new view (after rendering)
+        // Use requestAnimationFrame to ensure DOM is ready
+        requestAnimationFrame(() => {
+            if (UI.contentView) {
+                UI.contentView.scrollTop = state.scrollPositions[viewName] || 0;
+            }
+        });
     }
 
     async function loadHotSongs(source, page = 1, isAppend = false, forceRefresh = false) {
