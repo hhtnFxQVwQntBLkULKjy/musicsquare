@@ -2,6 +2,7 @@ class MusicPlayer {
     constructor() {
         this.audio = new Audio();
         this.playlist = [];
+        this.nextQueue = []; // Queue for "Play Next" songs - persists across setPlaylist calls
         this.historyStack = []; // Stack for previous tracks
         this.currentIndex = -1;
         this.isPlaying = false;
@@ -174,28 +175,20 @@ class MusicPlayer {
         if (!track) {
             if (this.loadingTimer) clearTimeout(this.loadingTimer);
             UI.hideLoadingLock();
-            return;
+            return false;
         }
 
-        // 锁定 UI，防止加载期间重复点击
         UI.showLoadingLock();
-
-        // Immediate UI update for better perceived performance
         UI.updatePlayerInfo(track);
 
         if (this.loadingTimer) clearTimeout(this.loadingTimer);
-        // 移除 0.9s 的 loading toast，因为已经有了全局锁定遮罩
-
         if (playlist) this.playlist = playlist;
 
-        // Push current to history if not navigating back
         if (!isFromHistory && this.currentTrack && this.currentTrack.id !== track.id) {
             this.historyStack.push(this.currentTrack);
-            // 限制历史记录最多100首
             if (this.historyStack.length > 100) {
                 this.historyStack.shift();
             }
-            // 持久化到服务端
             try {
                 DataService.addToHistory(this.currentTrack);
             } catch (e) {
@@ -203,7 +196,6 @@ class MusicPlayer {
             }
         }
 
-        // Ensure details (url & lrc) are loaded content-wise
         if (!track.url || !track.lrc || (typeof track.lrc === 'string' && track.lrc.startsWith('http'))) {
             try {
                 const detail = await MusicAPI.getSongDetails(track);
@@ -212,7 +204,6 @@ class MusicPlayer {
                     track.lrc = detail.lrc;
                     track.cover = detail.cover || track.cover;
                 } else if (!track.url) {
-                    // Fallback to search if no URL found and it's an imported/legacy track
                     console.log("Detail fetch found no URL, trying search fallback for:", track.title);
                     const originalTitle = track.title.split(' (')[0].trim();
                     const searchResults = await MusicAPI.search(originalTitle, track.source, 1, 5);
@@ -239,26 +230,21 @@ class MusicPlayer {
 
         if (!track.url) {
             console.error("No URL for track", track);
-            UI.hideLoadingLock(); // 先关闭遮罩
-            UI.showToast('无法获取音频地址', 'error'); // 再报错，确保互斥
-            return;
+            UI.hideLoadingLock();
+            UI.showToast('无法获取音频地址', 'error');
+            return false;
         }
 
-        // CRITICAL: Stop current playback before setting new source
-        // This prevents two songs from playing simultaneously
         this.audio.pause();
         this.audio.currentTime = 0;
-
         this.audio.src = track.url;
-        this.lyrics = []; // Clear old lyrics
-        UI.setLyrics([]); // Clear UI
+        this.lyrics = [];
+        UI.setLyrics([]);
 
-        // If lrc is already text, parse it
         if (track.lrc && !track.lrc.startsWith('http')) {
             this.parseLyrics(track.lrc);
             UI.setLyrics(this.lyrics);
         } else if (track.lrc && track.lrc.startsWith('http')) {
-            // Resolve URL in background
             const lrcUrl = track.lrc;
             const currentId = track.id;
             MusicAPI.fetchLrcText(lrcUrl).then(text => {
@@ -270,10 +256,7 @@ class MusicPlayer {
             });
         }
 
-        // Update player info AFTER all metadata is loaded to ensure fresh cover
         UI.updatePlayerInfo(track);
-
-        // Show Player Bar
         const bar = document.getElementById('player-bar');
         if (bar) {
             bar.style.transform = 'translateY(0)';
@@ -283,20 +266,19 @@ class MusicPlayer {
         try {
             await this.audio.play();
             this.currentTrack = track;
-
-            // 成功播放后解除锁定
             UI.hideLoadingLock();
-
-            // Sync playlist index if track is in current playlist
             const idx = this.playlist.findIndex(t => t.id === track.id);
             if (idx !== -1) {
                 this.currentIndex = idx;
-                UI.highlightPlaying(idx);
             }
+            // Always highlight by ID for reliable highlighting regardless of source (nextQueue, playlist, etc.)
+            UI.highlightPlayingByID(track.id);
+            return true;
         } catch (e) {
             console.error("Play failed", e);
             this.currentTrack = track;
-            UI.hideLoadingLock(); // 确保报错截流处也优先关闭锁
+            UI.hideLoadingLock();
+            return false;
         }
     }
 
@@ -326,70 +308,78 @@ class MusicPlayer {
 
     async checkAudioSilence() {
         if (!this.audioCtx || this.effectMode === 'original' || !this.isPlaying) return;
-
-        // Create an AnalyserNode to check for silence
         const analyser = this.audioCtx.createAnalyser();
         analyser.fftSize = 256;
         const bufferLength = analyser.frequencyBinCount;
         const dataArray = new Uint8Array(bufferLength);
-
-        // Connect the masterGain to the analyser
         this.masterGain.connect(analyser);
-
-        // Wait a moment for audio to process through the graph
         await new Promise(resolve => setTimeout(resolve, 500));
-
         analyser.getByteFrequencyData(dataArray);
-
-        // Calculate average volume
         let sum = 0;
         for (let i = 0; i < bufferLength; i++) {
             sum += dataArray[i];
         }
         const average = sum / bufferLength;
-
-        // Disconnect analyser
         this.masterGain.disconnect(analyser);
         analyser.disconnect();
-
-        // If average volume is very low, it might indicate a CORS issue preventing Web Audio API from processing
-        // A threshold of 5-10 is usually safe for silence detection.
         if (average < 5) {
-            console.warn("Detected potential audio silence with effects. This might be due to CORS restrictions on the audio source when using Web Audio API effects.");
+            console.warn("Detected potential audio silence with effects.");
             UI.showToast('音效模式下无声，可能因音源CORS限制。已自动切换回原声模式。', 'warning');
-            this.setAudioEffect('original'); // Fallback to original mode
+            this.setAudioEffect('original');
         }
     }
 
-    playNext(auto = false) {
-        if (this.playlist.length === 0) return;
+    async playNext(auto = false) {
+        // First, check if there are songs in the nextQueue
+        if (this.nextQueue.length > 0) {
+            const nextTrack = this.nextQueue.shift();
+            const success = await this.play(nextTrack);
+            if (success) return;
+            // If failed, try the next one in queue recursively
+            return this.playNext(auto);
+        }
 
-        let nextIndex;
+        if (this.playlist.length === 0) return;
+        let attempts = 0;
+        const maxAttempts = this.playlist.length;
+        let tryIndex = this.currentIndex;
+
         if (this.mode === 'single' && auto) {
             this.audio.currentTime = 0;
-            this.audio.play();
+            try {
+                await this.audio.play();
+            } catch (e) { console.warn("Replay failed", e); }
             return;
         }
 
-        if (this.mode === 'shuffle') {
-            nextIndex = Math.floor(Math.random() * this.playlist.length);
-        } else {
-            nextIndex = this.currentIndex + 1;
-            if (nextIndex >= this.playlist.length) nextIndex = 0;
+        while (attempts < maxAttempts) {
+            if (this.mode === 'shuffle') {
+                tryIndex = Math.floor(Math.random() * this.playlist.length);
+            } else {
+                tryIndex++;
+                if (tryIndex >= this.playlist.length) tryIndex = 0;
+            }
+            const track = this.playlist[tryIndex];
+            const success = await this.play(track);
+            if (success) return;
+            attempts++;
+            if (this.mode !== 'shuffle' && tryIndex === this.currentIndex) break;
         }
+        UI.showToast('没有可播放的歌曲', 'warning');
+    }
 
-        this.play(this.playlist[nextIndex]);
+    // Add song(s) to the "Play Next" queue
+    addToNextQueue(songs) {
+        if (!Array.isArray(songs)) songs = [songs];
+        this.nextQueue.push(...songs);
     }
 
     playPrev() {
-        // If history exists, pop from history
         if (this.historyStack.length > 0) {
             const prevTrack = this.historyStack.pop();
-            this.play(prevTrack, true); // true = don't push to history again
+            this.play(prevTrack, true);
             return;
         }
-
-        // Fallback to playlist prev
         if (this.playlist.length === 0) return;
         let prevIndex = this.currentIndex - 1;
         if (prevIndex < 0) prevIndex = this.playlist.length - 1;
@@ -398,30 +388,18 @@ class MusicPlayer {
 
     async prefetchNextSong() {
         if (this.playlist.length === 0 || !this.isPlaying) return;
-
         let nextIndex;
-        if (this.mode === 'single') {
-            // Single loop mode - next song is same song, no need to prefetch
-            return;
-        } else if (this.mode === 'shuffle') {
-            // Shuffle mode - pick random next
-            nextIndex = Math.floor(Math.random() * this.playlist.length);
-        } else {
-            // List mode - next in sequence
+        if (this.mode === 'single') return;
+        else if (this.mode === 'shuffle') nextIndex = Math.floor(Math.random() * this.playlist.length);
+        else {
             nextIndex = this.currentIndex + 1;
             if (nextIndex >= this.playlist.length) nextIndex = 0;
         }
-
         const nextTrack = this.playlist[nextIndex];
-        if (!nextTrack || nextTrack.url) return; // Already has URL or invalid
-
+        if (!nextTrack || nextTrack.url) return;
         try {
-            console.log('Prefetching next song:', nextTrack.title);
             await MusicAPI.getSongDetails(nextTrack);
-        } catch (e) {
-            // Silently fail - prefetch is best-effort
-            console.warn('Prefetch failed for:', nextTrack.title);
-        }
+        } catch (e) { console.warn('Prefetch failed for:', nextTrack.title); }
     }
 
     setPlaylist(list, startIndex = 0, targetId = null) {
@@ -437,16 +415,12 @@ class MusicPlayer {
     parseLyrics(lrcText) {
         this.lyrics = [];
         if (!lrcText) return;
-
         const lines = lrcText.split(/\r?\n/);
-        // More flexible regex: [m:ss], [mm:ss.xxx], etc.
         const tagReg = /\[(\d{1,3}):(\d{1,2})(?:\.(\d{1,4}))?\]/g;
-
         for (const line of lines) {
             let match;
             const text = line.replace(tagReg, '').trim();
             if (!text) continue;
-
             tagReg.lastIndex = 0;
             let foundTag = false;
             while ((match = tagReg.exec(line)) !== null) {
@@ -458,20 +432,12 @@ class MusicPlayer {
                 this.lyrics.push({ time, text });
                 foundTag = true;
             }
-
-            // Fallback for lines without tags (if it's a pure text lyric)
             if (!foundTag && text && this.lyrics.length === 0 && lines.length < 50) {
-                // If it's a very short text or we haven't found any tags yet, 
-                // maybe it's title/artist info or pure text lyrics.
-                // We'll give it a mock time to show it.
                 this.lyrics.push({ time: 0, text });
             }
         }
-
-        if (this.lyrics.length > 0) {
-            this.lyrics.sort((a, b) => a.time - b.time);
-        } else if (lrcText.trim()) {
-            // Full fallback: if no tags found at all, split by lines and show all
+        if (this.lyrics.length > 0) this.lyrics.sort((a, b) => a.time - b.time);
+        else if (lrcText.trim()) {
             lines.forEach((l, i) => {
                 const t = l.trim();
                 if (t) this.lyrics.push({ time: i * 0.001, text: t });
@@ -481,18 +447,12 @@ class MusicPlayer {
 
     updateLyrics(time) {
         if (this.lyrics.length === 0) return;
-
-        // Find current line
         let index = this.lyrics.findIndex(l => l.time > time) - 1;
         if (index < 0) {
             if (time < this.lyrics[0].time) index = -1;
             else index = this.lyrics.length - 1;
         }
-
-        if (this.lyrics.every(l => l.time <= time)) {
-            index = this.lyrics.length - 1;
-        }
-
+        if (this.lyrics.every(l => l.time <= time)) index = this.lyrics.length - 1;
         if (index !== this.lyricIndex) {
             this.lyricIndex = index;
             UI.highlightLyric(index);
@@ -509,30 +469,20 @@ class MusicPlayer {
             const AudioContext = window.AudioContext || window.webkitAudioContext;
             this.audioCtx = new AudioContext();
             this.source = this.audioCtx.createMediaElementSource(this.audio);
-
-            // Create Nodes
             this.lowFilter = this.audioCtx.createBiquadFilter();
             this.lowFilter.type = 'lowshelf';
             this.lowFilter.frequency.value = 200;
-
             this.highFilter = this.audioCtx.createBiquadFilter();
             this.highFilter.type = 'highshelf';
             this.highFilter.frequency.value = 3000;
-
             this.convolver = this.audioCtx.createConvolver();
             this.convolver.buffer = this.createImpulseResponse(1.5, 1.5);
-
             this.reverbGain = this.audioCtx.createGain();
             this.reverbGain.gain.value = 0;
-
-            // Master Gain
             this.masterGain = this.audioCtx.createGain();
-
-            // Connect initial: Source -> Master -> Dest
             this.source.connect(this.masterGain);
             this.masterGain.connect(this.audioCtx.destination);
             this.isAudioContextConnected = true;
-
         } catch (e) {
             console.error("Web Audio API initialization failed", e);
             this.isAudioContextConnected = false;
@@ -545,9 +495,7 @@ class MusicPlayer {
         const impulse = this.audioCtx.createBuffer(2, length, rate);
         const left = impulse.getChannelData(0);
         const right = impulse.getChannelData(1);
-
         for (let i = 0; i < length; i++) {
-            const n = length - i;
             left[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
             right[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
         }
@@ -556,31 +504,23 @@ class MusicPlayer {
 
     setAudioEffect(mode) {
         if (!this.audioCtx) this.initAudioContext();
-        if (!this.isAudioContextConnected) {
-            console.warn("AudioContext not connected, skipping effect application");
-            return;
-        }
-
+        if (!this.isAudioContextConnected) return;
         this.effectMode = mode;
         try {
-            // Reset Connections
             this.source.disconnect();
             this.lowFilter.disconnect();
             this.highFilter.disconnect();
             this.convolver.disconnect();
             this.reverbGain.disconnect();
             this.masterGain.disconnect();
-
             if (mode === 'original') {
                 this.source.connect(this.masterGain);
                 this.masterGain.connect(this.audioCtx.destination);
                 return;
             }
-
             this.source.connect(this.lowFilter);
             this.lowFilter.connect(this.highFilter);
             let lastNode = this.highFilter;
-
             if (mode === 'headphone') {
                 this.lowFilter.gain.value = 3;
                 this.highFilter.gain.value = 3;
@@ -596,8 +536,7 @@ class MusicPlayer {
             }
             this.masterGain.connect(this.audioCtx.destination);
         } catch (err) {
-            console.error("Failed to set audio effect (likely CORS):", err);
-            // Emergency reconnect directly skip all nodes
+            console.error("Failed to set audio effect:", err);
             try {
                 this.source.disconnect();
                 this.source.connect(this.audioCtx.destination);
@@ -608,5 +547,4 @@ class MusicPlayer {
 }
 
 const player = new MusicPlayer();
-// 导出到 window 使其在其他脚本中可用
 window.player = player;

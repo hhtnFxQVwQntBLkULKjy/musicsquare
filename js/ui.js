@@ -495,7 +495,7 @@ const UI = {
             const list = [...self.selectedSongs];
             if (list.length === 0) return;
             if (window.player) {
-                window.player.playlist.splice(window.player.currentIndex + 1, 0, ...list);
+                window.player.addToNextQueue(list);
                 self.showToast(`已添加 ${list.length} 首歌曲到播放队列`);
                 self.selectedSongs.clear();
                 self.updateBatchBar();
@@ -1016,7 +1016,7 @@ const UI = {
         playNext.parentNode.replaceChild(newPlayNext, playNext);
         addPl.parentNode.replaceChild(newAddPl, addPl);
         newPlayNext.onclick = () => {
-            player.playlist.splice(player.currentIndex + 1, 0, song);
+            player.addToNextQueue(song);
             menu.style.display = 'none';
             this.showToast('已添加到下一首播放');
         };
