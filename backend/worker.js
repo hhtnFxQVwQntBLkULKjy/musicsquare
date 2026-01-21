@@ -330,7 +330,22 @@ export default {
                         // Create New - add platform prefix
                         const platformPrefixes = { netease: '网易:', qq: 'QQ:', kuwo: '酷我:' };
                         const prefix = platformPrefixes[platform] || (platform + ':');
-                        const prefixedName = prefix + pl.name;
+
+                        // Robustly strip ALL possible old prefixes (repeating, mixed, spaces, wide colons)
+                        let cleanName = pl.name;
+                        const knownPrefixes = ['网易:', 'QQ:', '酷我:', 'netease:', 'qq:', 'kuwo:', '网易：', '酷我：', 'QQ：'];
+                        let found = true;
+                        while (found) {
+                            found = false;
+                            for (const p of knownPrefixes) {
+                                if (cleanName.toLowerCase().startsWith(p.toLowerCase())) {
+                                    cleanName = cleanName.slice(p.length).trim();
+                                    found = true;
+                                }
+                            }
+                        }
+
+                        const prefixedName = prefix + cleanName;
                         const res = await env.DB.prepare(
                             "INSERT INTO playlists (user_id, name, is_sync, platform, external_id, can_delete, created_at) VALUES (?, ?, 1, ?, ?, 1, ?)" // can_delete=1 now
                         ).bind(userId, prefixedName, platform, pl.id, Date.now()).run();
@@ -557,16 +572,33 @@ export default {
                 return p + ':';
             };
 
+            const getCleanedName = (raw) => {
+                let n = raw;
+                const knownPrefixes = ['网易:', 'QQ:', '酷我:', 'netease:', 'qq:', 'kuwo:', '网易：', '酷我：', 'QQ：'];
+                let found = true;
+                while (found) {
+                    found = false;
+                    for (const p of knownPrefixes) {
+                        if (n.toLowerCase().startsWith(p.toLowerCase())) {
+                            n = n.slice(p.length).trim();
+                            found = true;
+                        }
+                    }
+                }
+                return n;
+            };
+
             if (!pl) {
+                const prefixedName = getPlatformPrefix(platform) + getCleanedName(name);
                 const res = await env.DB.prepare("INSERT INTO playlists (user_id, name, is_sync, platform, external_id, created_at) VALUES (?, ?, 1, ?, ?, ?)")
-                    .bind(userId, getPlatformPrefix(platform) + name, platform, externalId, Date.now()).run();
+                    .bind(userId, prefixedName, platform, externalId, Date.now()).run();
                 playlistId = res.meta.last_row_id;
             } else {
                 playlistId = pl.id;
-                // Update name if changed (keep prefix)
-                const newPrefixedName = getPlatformPrefix(platform) + name;
-                if (pl.name !== newPrefixedName) {
-                    await env.DB.prepare("UPDATE playlists SET name = ? WHERE id = ?").bind(newPrefixedName, playlistId).run();
+                // Update name if changed (keep prefix, strip duplicates)
+                const prefixedName = getPlatformPrefix(platform) + getCleanedName(name);
+                if (pl.name !== prefixedName) {
+                    await env.DB.prepare("UPDATE playlists SET name = ? WHERE id = ?").bind(prefixedName, playlistId).run();
                 }
             }
 

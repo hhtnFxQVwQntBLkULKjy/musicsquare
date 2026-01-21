@@ -73,6 +73,17 @@ const DataService = {
             const parsed = MusicAPI.parsePlaylistUrl(url);
             if (!parsed) throw new Error("无法解析链接，请检查格式是否正确");
 
+            // Deduplication Check
+            const existing = this.playlists.find(p =>
+                (p.platform === parsed.source || p.source === parsed.source) &&
+                (String(p.externalId) === String(parsed.id) || String(p.external_id) === String(parsed.id))
+            );
+
+            if (existing) {
+                console.log("Found existing playlist for sync:", existing.name);
+                return await this.syncExistingPlaylist(existing);
+            }
+
             const platformNames = { netease: '网易云', qq: 'QQ', kuwo: '酷我' };
             UI.showToast(`正在从${platformNames[platform] || platform}获取歌单...`, 'info');
 
@@ -99,6 +110,91 @@ const DataService = {
             console.error('Sync Error:', e);
             UI.showToast(`同步失败: ${e.message}`, 'error');
             return false;
+        }
+    },
+
+    async syncExistingPlaylist(pl) {
+        try {
+            // Determine source/id from plyalist object
+            const platform = pl.platform || pl.source;
+            const extId = pl.externalId || pl.external_id;
+
+            if (!platform || !extId) {
+                UI.showToast("该歌单缺少同步信息", "error");
+                return false;
+            }
+
+            // Quietly fetch new songs
+            const result = await MusicAPI.getPlaylistSongs(platform, extId);
+            if (!result || !result.tracks) {
+                console.warn(`Empty sync result for ${pl.name}`);
+                return false;
+            }
+
+            const freshSongs = result.tracks.map(s => this.cleanSong(s));
+
+            // Use Backend Incremental Sync Endpoint
+            // This endpoint handles adding new songs AND removing deleted songs (while preserving manual adds)
+            // Clean name before sending to prevent prefix accumulation
+            let cleanPlName = pl.name;
+            const prefixes = ['网易:', 'QQ:', '酷我:', 'netease:', 'qq:', 'kuwo:', '网易：', '酷我：', 'QQ：'];
+            let found = true;
+            while (found) {
+                found = false;
+                for (const p of prefixes) {
+                    if (cleanPlName.toLowerCase().startsWith(p.toLowerCase())) {
+                        cleanPlName = cleanPlName.slice(p.length).trim();
+                        found = true;
+                    }
+                }
+            }
+
+            const res = await fetch(`${API_BASE}/playlists/sync`, {
+                method: 'POST',
+                headers: { ...this.authHeader, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    platform: platform,
+                    externalId: extId,
+                    name: cleanPlName,
+                    songs: freshSongs
+                })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '同步失败');
+
+            UI.showToast(`歌单 "${pl.name}" 同步完成`, 'success');
+            await this.fetchPlaylists(); // Refresh local list to show changes
+            return true;
+        } catch (e) {
+            console.error("Sync Existing Error:", e);
+            UI.showToast("同步出错", "error");
+            return false;
+        }
+    },
+
+    checkAutoSync() {
+        const LAST_SYNC_KEY = 'last_daily_sync_date';
+        const now = new Date();
+        const beijingTime = new Date(now.getTime() + (480 + now.getTimezoneOffset()) * 60000); // Rough conversion if local is not BJ
+        // User's browser time + 8 offset... 
+        // Actually, just check if it's past 8 AM local time (if user is in China) or checking strict BJ time.
+        // User asked "China Beijing Time 8 AM".
+        // I will trust the user's system time if they are in China, or close enough.
+        // Let's use simple logic: If (Hours >= 8) and (LastSyncDate != TodayDateStr)
+
+        const todayStr = beijingTime.toISOString().split('T')[0];
+        const lastSync = localStorage.getItem(LAST_SYNC_KEY);
+
+        if (beijingTime.getHours() >= 8 && lastSync !== todayStr) {
+            console.log("Triggering Daily Auto Sync...");
+            localStorage.setItem(LAST_SYNC_KEY, todayStr);
+
+            // Sync all imported playlists
+            this.playlists.forEach(pl => {
+                if ((pl.platform || pl.source) && (pl.externalId || pl.external_id)) {
+                    this.syncExistingPlaylist(pl);
+                }
+            });
         }
     },
 
@@ -147,7 +243,8 @@ const DataService = {
                 headers: this.authHeader
             });
             if (res.ok) {
-                this.favorites = await res.json();
+                // Reverse to show newest first
+                this.favorites = (await res.json()).reverse();
             }
         } catch (e) {
             console.error('Fetch Favorites Error:', e);
@@ -156,8 +253,8 @@ const DataService = {
     },
 
     async addFavorite(song) {
-        // Optimistic update
-        this.favorites.push(song);
+        // Optimistic update - add to top
+        this.favorites.unshift(song);
         try {
             await fetch(`${API_BASE}/favorites`, {
                 method: 'POST',
@@ -171,8 +268,8 @@ const DataService = {
     },
 
     async addBatchFavorites(songs) {
-        // Optimistic update
-        this.favorites.push(...songs);
+        // Optimistic update - add to top
+        this.favorites.unshift(...songs);
         try {
             const res = await fetch(`${API_BASE}/favorites/batch`, {
                 method: 'POST',
@@ -237,6 +334,10 @@ const DataService = {
             });
             if (res.ok) {
                 this.playlists = await res.json();
+                // Reverse tracks for each playlist to show newest first
+                this.playlists.forEach(pl => {
+                    if (pl.tracks) pl.tracks.reverse();
+                });
             }
         } catch (e) {
             console.error('Fetch Playlists Error:', e);
@@ -301,9 +402,9 @@ const DataService = {
         // Check for duplicate using both id and uid
         if (pl.tracks.some(t => (song.id && t.id === song.id) || (song.uid && t.uid === song.uid))) return false;
 
-        // Optimistic update
+        // Optimistic update - add to top
         const tempTrack = { ...song };
-        pl.tracks.push(tempTrack);
+        pl.tracks.unshift(tempTrack);
 
         try {
             const res = await fetch(`${API_BASE}/playlists/${playlistId}/songs`, {
@@ -341,8 +442,12 @@ const DataService = {
         const newSongs = songs.filter(s => !pl.tracks.some(t => t.id === s.id));
         if (newSongs.length === 0) return true;
 
-        // Optimistic
-        pl.tracks.push(...newSongs);
+        // Optimistic - add to top (Reverse to preserve newest-first)
+        // If songs is [Old, ..., New], we want [New, ..., Old] at top.
+        // unshift(...songs) puts songs[0] at top.
+        // So we reverse first.
+        const reversedSongs = [...newSongs].reverse();
+        pl.tracks.unshift(...reversedSongs);
 
         try {
             const res = await fetch(`${API_BASE}/playlists/batch-songs`, {

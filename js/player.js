@@ -51,6 +51,10 @@ class MusicPlayer {
             }
             UI.clearLoadingToasts();
 
+            // Reset skipping errors flag
+            this._isSkippingErrors = false;
+            this._errorSkipCount = 0;
+
             // Prefetch next song after 3 seconds delay to avoid slowing down current playback
             if (this.prefetchTimer) clearTimeout(this.prefetchTimer);
             this.prefetchTimer = setTimeout(() => {
@@ -83,31 +87,36 @@ class MusicPlayer {
             }
             UI.clearLoadingToasts();
 
-            // 报错截流：2.5秒内不重复弹窗
-            const now = Date.now();
-            if (now - this._lastErrorTime > 2500) {
-                UI.hideLoadingLock(); // 报错前先关闭遮罩，确保互斥
-                UI.showToast('该歌曲暂无法提供播放，欢迎您到正版音乐平台收听或下载。', 'error');
-                this._lastErrorTime = now;
-            } else {
-                UI.hideLoadingLock();
+            // Mark as unplayable
+            if (this.currentTrack) {
+                this.currentTrack.unplayable = true;
+                if (UI.markSongUnplayable) UI.markSongUnplayable(this.currentTrack.id || this.currentTrack.uid);
             }
 
-            // Auto-retry logic for expired URLs
-            if (this.currentTrack && !this.currentTrack._retried) {
-                this.currentTrack._retried = true;
-                console.log("Retrying playback with fresh URL...", this.currentTrack.title);
-                try {
-                    this.currentTrack.url = null;
-                    const detail = await MusicAPI.getSongDetails(this.currentTrack);
-                    if (detail && detail.url) {
-                        this.currentTrack.url = detail.url;
-                        this.audio.src = detail.url;
-                        this.audio.play();
-                        return;
-                    }
-                } catch (err) { console.error("Retry failed", err); }
+            // Consolidate error reporting
+            const now = Date.now();
+            if (!this._isSkippingErrors) {
+                // First error in a sequence or isolated error
+                if (now - this._lastErrorTime > 2500) {
+                    // UI.hideLoadingLock(); // Keep lock if we are skipping? No, better hide it.
+                    // Actually, if we are skipping rapidly, we might want to show a persistent "Skipping..." toast.
+                    this._isSkippingErrors = true;
+                    this._errorSkipCount = 1;
+                    UI.showToast('歌曲无法播放，自动跳过...', 'warning');
+                    this._lastErrorTime = now;
+                }
+            } else {
+                this._errorSkipCount = (this._errorSkipCount || 0) + 1;
+                // Optionally update toast text if possible, or just silent skip
             }
+
+            UI.hideLoadingLock();
+
+            // Auto-retry / Skip logic
+            // Delay slightly to prevent infinite rapid loop freezing UI
+            setTimeout(() => {
+                this.playNext(true);
+            }, 500);
         });
     }
 
@@ -360,6 +369,10 @@ class MusicPlayer {
                 if (tryIndex >= this.playlist.length) tryIndex = 0;
             }
             const track = this.playlist[tryIndex];
+            if (track.unplayable) {
+                attempts++;
+                continue; // Skip unplayable songs
+            }
             const success = await this.play(track);
             if (success) return;
             attempts++;

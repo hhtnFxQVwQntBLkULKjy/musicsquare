@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // Init Data
     await DataService.init();
+    DataService.checkAutoSync(); // Auto Sync Check
 
     // 加载持久化的播放历史（限制100首）
     try {
@@ -667,17 +668,44 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <i class="fas ${icon}"></i> 
                 <span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-left:5px;">${pl.name}</span>
             </div>
-            <i class="fas fa-trash-alt nav-action-icon del-btn" style="font-size:12px;opacity:0;transition:opacity 0.2s;" title="删除"></i>
+            <div style="display:flex;gap:8px;align-items:center;">
+                <i class="fas fa-sync-alt nav-action-icon sync-btn" style="font-size:12px;opacity:0;transition:opacity 0.2s;display:none;cursor:pointer;" title="同步歌单"></i>
+                <i class="fas fa-trash-alt nav-action-icon del-btn" style="font-size:12px;opacity:0;transition:opacity 0.2s;cursor:pointer;" title="删除"></i>
+            </div>
         `;
 
         div.onmouseenter = () => {
-            const btn = div.querySelector('.del-btn');
-            if (btn) btn.style.opacity = '1';
+            div.querySelectorAll('.nav-action-icon').forEach(btn => btn.style.opacity = '1');
         };
         div.onmouseleave = () => {
-            const btn = div.querySelector('.del-btn');
-            if (btn) btn.style.opacity = '0';
+            div.querySelectorAll('.nav-action-icon').forEach(btn => btn.style.opacity = '0');
         };
+
+        // Sync Button Logic
+        const syncBtn = div.querySelector('.sync-btn');
+        if ((pl.platform || pl.source) && (pl.externalId || pl.external_id)) {
+            syncBtn.style.display = 'block';
+            syncBtn.addEventListener('click', async (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                syncBtn.classList.add('fa-spin');
+                const success = await DataService.syncExistingPlaylist(pl);
+                syncBtn.classList.remove('fa-spin');
+
+                // If currently viewing this playlist, refresh the view
+                if (success) {
+                    renderSidebarPlaylists(); // Refresh names in sidebar
+                    if (state.currentView === 'playlist' && state.currentPlaylistId === pl.id) {
+                        const freshPl = DataService.playlists.find(p => p.id === pl.id);
+                        if (freshPl) {
+                            state.currentListData = freshPl.tracks;
+                            UI.renderSongList(freshPl.tracks, 1, 1, null, true, 'playlist', pl.id);
+                        }
+                    }
+                }
+            });
+        }
+
         const delBtn = div.querySelector('.del-btn');
         if (delBtn) {
             delBtn.addEventListener('click', (e) => {
