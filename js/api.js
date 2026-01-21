@@ -22,6 +22,11 @@ const MusicAPI = {
             return url;
         }
 
+        // Always proxy Kuwo images to fix certificate errors
+        if (url.includes('kwcdn.kuwo.cn')) {
+            return PROXY_BASE + encodeURIComponent(url);
+        }
+
         // Check if URL needs proxy based on domain patterns
         const needProxyByDomain = url.includes('126.net') ||
             url.includes('qq.com') ||
@@ -48,6 +53,18 @@ const MusicAPI = {
         try {
             const url = `${this.endpoints.base}?source=${source}&type=search&keyword=${encodeURIComponent(keyword)}&page=${page}&limit=${limit}`;
             const res = await fetch(url);
+
+            // Handle network errors
+            if (!res.ok) {
+                const srcMap = { 'netease': '网易', 'qq': 'QQ', 'kuwo': '酷我' };
+                const srcName = srcMap[source] || source;
+                console.error(`搜索 "${keyword}" 失败:`, `HTTP ${res.status}`);
+                if (window.UI && typeof window.UI.showToast === 'function') {
+                    UI.showToast(`${srcName}音乐搜索失败，请稍后重试`, 'error');
+                }
+                return [];
+            }
+
             const json = await res.json();
 
             if (json.message && json.message.includes('重试次数过多')) {
@@ -65,13 +82,18 @@ const MusicAPI = {
             const results = list.map(item => {
                 const sid = String(item.id || item.songid || item.mid || '');
                 const src = item.platform || item.source || source;
+                let coverUrl = item.pic || item.cover || item.image || '';
+                // Proxy Kuwo images to fix certificate errors
+                if (src === 'kuwo' && coverUrl) {
+                    coverUrl = this.getProxyUrl(coverUrl, src);
+                }
                 return {
                     id: `${src}-${sid}`,
                     songId: sid,
                     title: item.name || item.title || '未知歌曲',
                     artist: item.artist || item.author || '未知歌手',
                     album: item.album || item.albumname || '-',
-                    cover: item.pic || item.cover || item.image || '',
+                    cover: coverUrl,
                     source: src,
                     duration: item.interval || item.duration || 0,
                     quality: item.quality,
@@ -90,7 +112,12 @@ const MusicAPI = {
 
             return results;
         } catch (e) {
-            console.error(`Search error [${source}]:`, e);
+            const srcMap = { 'netease': '网易', 'qq': 'QQ', 'kuwo': '酷我' };
+            const srcName = srcMap[source] || source;
+            console.error(`搜索 "${keyword}" 失败:`, e.message);
+            if (window.UI && typeof window.UI.showToast === 'function') {
+                UI.showToast(`${srcName}音乐搜索失败: ${e.message}`, 'error');
+            }
             return [];
         }
     },
@@ -108,13 +135,18 @@ const MusicAPI = {
             return list.map(item => {
                 const sid = String(item.id || item.songid || item.mid || '');
                 const src = item.platform || item.source || 'netease';
+                let coverUrl = item.pic || item.cover || '';
+                // Proxy Kuwo images to fix certificate errors
+                if (src === 'kuwo' && coverUrl) {
+                    coverUrl = this.getProxyUrl(coverUrl, src);
+                }
                 return {
                     id: `${src}-${sid}`,
                     songId: sid,
                     title: item.name || item.title || '未知歌曲',
                     artist: item.artist || item.author || '未知歌手',
                     album: item.album || '-',
-                    cover: item.pic || item.cover || '',
+                    cover: coverUrl,
                     source: src,
                     duration: item.interval || item.duration || 0,
                     quality: item.quality,
@@ -294,13 +326,18 @@ const MusicAPI = {
                     tracks: list.map(s => {
                         const sid = String(s.id || s.songid || s.mid || '');
                         const src = s.platform || s.source || source;
+                        let coverUrl = s.pic || s.cover || '';
+                        // Proxy Kuwo images to fix certificate errors
+                        if (src === 'kuwo' && coverUrl) {
+                            coverUrl = this.getProxyUrl(coverUrl, src);
+                        }
                         return {
                             id: `${src}-${sid}`,
                             songId: sid,
                             title: s.name || s.title || '未知歌曲',
                             artist: s.artist || s.author || '未知歌手',
                             album: s.album || '-',
-                            cover: s.pic || s.cover || '',
+                            cover: coverUrl,
                             source: src,
                             url: s.url || '',
                             lrc: s.lrc || '',
@@ -349,8 +386,12 @@ const MusicAPI = {
                     const sid = String(s.id || s.songid || s.mid || '');
                     // For Kuwo, use API proxy for cover images to bypass CORS
                     let coverUrl = s.pic || '';
-                    if (source === 'kuwo' && sid) {
-                        coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
+                    if (source === 'kuwo') {
+                        if (sid) {
+                            coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
+                        } else if (coverUrl) {
+                            coverUrl = this.getProxyUrl(coverUrl, source);
+                        }
                     }
                     return {
                         id: `${source}-${sid}`,
