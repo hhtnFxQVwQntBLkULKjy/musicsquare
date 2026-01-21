@@ -359,12 +359,19 @@ const MusicAPI = {
             const json = await res.json();
             if (json.code === 200 && json.data) {
                 const list = json.data.list || json.data.results || (Array.isArray(json.data) ? json.data : []);
-                return list.map(item => ({
-                    id: item.id || item.uid,
-                    name: item.name || item.title || '未知榜单',
-                    pic: item.pic || item.cover || item.image || '',
-                    updateFrequency: item.updateFrequency || ''
-                }));
+                return list.map(item => {
+                    let picUrl = item.pic || item.cover || item.image || '';
+                    // Proxy image URLs to fix certificate errors, especially for Kuwo
+                    if (picUrl) {
+                        picUrl = this.getProxyUrl(picUrl, source);
+                    }
+                    return {
+                        id: item.id || item.uid,
+                        name: item.name || item.title || '未知榜单',
+                        pic: picUrl,
+                        updateFrequency: item.updateFrequency || ''
+                    };
+                });
             }
         } catch (e) {
             console.error("Billboard list fetch error:", e);
