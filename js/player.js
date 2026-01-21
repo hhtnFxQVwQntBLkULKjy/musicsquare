@@ -49,6 +49,12 @@ class MusicPlayer {
                 this.loadingTimer = null;
             }
             UI.clearLoadingToasts();
+
+            // Prefetch next song after 3 seconds delay to avoid slowing down current playback
+            if (this.prefetchTimer) clearTimeout(this.prefetchTimer);
+            this.prefetchTimer = setTimeout(() => {
+                this.prefetchNextSong();
+            }, 5000);
         });
 
         this.audio.addEventListener('pause', () => {
@@ -57,6 +63,11 @@ class MusicPlayer {
             if (this.loadingTimer) {
                 clearTimeout(this.loadingTimer);
                 this.loadingTimer = null;
+            }
+            // Clear prefetch timer when paused
+            if (this.prefetchTimer) {
+                clearTimeout(this.prefetchTimer);
+                this.prefetchTimer = null;
             }
             UI.clearLoadingToasts();
             if (UI.updatePlayState) UI.updatePlayState(false);
@@ -169,6 +180,9 @@ class MusicPlayer {
         // 锁定 UI，防止加载期间重复点击
         UI.showLoadingLock();
 
+        // Immediate UI update for better perceived performance
+        UI.updatePlayerInfo(track);
+
         if (this.loadingTimer) clearTimeout(this.loadingTimer);
         // 移除 0.9s 的 loading toast，因为已经有了全局锁定遮罩
 
@@ -230,6 +244,11 @@ class MusicPlayer {
             return;
         }
 
+        // CRITICAL: Stop current playback before setting new source
+        // This prevents two songs from playing simultaneously
+        this.audio.pause();
+        this.audio.currentTime = 0;
+
         this.audio.src = track.url;
         this.lyrics = []; // Clear old lyrics
         UI.setLyrics([]); // Clear UI
@@ -251,6 +270,7 @@ class MusicPlayer {
             });
         }
 
+        // Update player info AFTER all metadata is loaded to ensure fresh cover
         UI.updatePlayerInfo(track);
 
         // Show Player Bar
@@ -374,6 +394,34 @@ class MusicPlayer {
         let prevIndex = this.currentIndex - 1;
         if (prevIndex < 0) prevIndex = this.playlist.length - 1;
         this.play(this.playlist[prevIndex]);
+    }
+
+    async prefetchNextSong() {
+        if (this.playlist.length === 0 || !this.isPlaying) return;
+
+        let nextIndex;
+        if (this.mode === 'single') {
+            // Single loop mode - next song is same song, no need to prefetch
+            return;
+        } else if (this.mode === 'shuffle') {
+            // Shuffle mode - pick random next
+            nextIndex = Math.floor(Math.random() * this.playlist.length);
+        } else {
+            // List mode - next in sequence
+            nextIndex = this.currentIndex + 1;
+            if (nextIndex >= this.playlist.length) nextIndex = 0;
+        }
+
+        const nextTrack = this.playlist[nextIndex];
+        if (!nextTrack || nextTrack.url) return; // Already has URL or invalid
+
+        try {
+            console.log('Prefetching next song:', nextTrack.title);
+            await MusicAPI.getSongDetails(nextTrack);
+        } catch (e) {
+            // Silently fail - prefetch is best-effort
+            console.warn('Prefetch failed for:', nextTrack.title);
+        }
     }
 
     setPlaylist(list, startIndex = 0, targetId = null) {

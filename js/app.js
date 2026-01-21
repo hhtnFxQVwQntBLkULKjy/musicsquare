@@ -97,6 +97,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     // View request ID to prevent race conditions when switching views quickly
     let currentViewRequestId = 0;
 
+    // Search abort controller to cancel pending searches when switching sources
+    let currentSearchController = null;
+
     // Listen for favorites update event
     document.addEventListener('favorites-updated', async () => {
         if (state.currentView === 'favorites') {
@@ -269,6 +272,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
                 // Check if view changed during async operation
                 if (thisRequestId !== currentViewRequestId) return;
+                // Check if source changed during async operation
+                if (source !== state.hotActiveSource) return;
 
                 // Render grid with back button hidden
                 UI.hideChartBackButton();
@@ -288,11 +293,20 @@ document.addEventListener('DOMContentLoaded', async () => {
             UI.showChartBackButton(sourceState.currentBillboardName || '榜单详情', () => {
                 // Clear selection and go back to list (keep listCache for speed)
                 state.hotBillboardState[source].selectedBillboardId = null;
+                Object.assign(state.hotBillboardState[source], {
+                    selectedBillboardId: null,
+                    // Don't clear cache here so we can potentially re-enter without fetch IF same ID
+                });
                 loadHotSongs(source, 1);
             });
 
-            // Use cached detail if available (unless appending or force refresh)
-            if (!isAppend && sourceState.detailCache && sourceState.detailCache.length > 0 && !forceRefresh) {
+            // Use cached detail only if it matches current billboard ID
+            if (!isAppend &&
+                sourceState.detailCache &&
+                sourceState.detailCache.length > 0 &&
+                sourceState.cachedBillboardId === billboardId && // Check ID match
+                !forceRefresh) {
+
                 state.currentListData = sourceState.detailCache;
                 state.hotSongsCache[source] = sourceState.detailCache;
                 UI.renderSongList(sourceState.detailCache, 1, 1, () => { }, false, 'hot', null, false);
@@ -309,6 +323,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             // Check if view changed during async operation
             if (thisRequestId !== currentViewRequestId) return;
+            // Check if source changed during async operation
+            if (source !== state.hotActiveSource) return;
 
             const seenIds = new Set(isAppend ? (state.hotSongsCache[source] || []).map(s => s.id) : []);
             const actuallyNew = res.filter(item => {
@@ -325,6 +341,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 }
                 state.currentListData = state.hotSongsCache[source];
                 state.hotBillboardState[source].detailCache = state.hotSongsCache[source];
+                state.hotBillboardState[source].cachedBillboardId = billboardId; // Save ID for validation
                 UI.renderSongList(isAppend ? actuallyNew : state.hotSongsCache[source], 1, 1, () => {
                     // Toplists are usually full lists
                 }, false, 'hot', null, isAppend);
@@ -360,24 +377,50 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Capture current request ID
         const thisRequestId = currentViewRequestId;
 
+        // Abort any pending search requests
+        if (currentSearchController && !isAppend) {
+            currentSearchController.abort();
+        }
+
+        // Create new abort controller for this search
+        if (!isAppend) {
+            currentSearchController = new AbortController();
+        }
+        const searchSignal = currentSearchController?.signal;
+
+        // Track this specific search request
+        if (!isAppend) {
+            state.currentSearchId = (state.currentSearchId || 0) + 1;
+        }
+        const thisSearchId = state.currentSearchId;
+
         if (!isAppend) {
             UI.showLoading();
             state.globalResults = [];
+            state.searchDisplayCount = 0; // Reset display count for new search
             if (UI.contentView) UI.contentView.scrollTop = 0;
+        } else {
+            // Only show "loading more" indicator on scroll, not initial search
+            UI.setLoadingMore(true);
         }
         state.isLoadingMore = true;
-        UI.setLoadingMore(true);
         try {
             let merged = [];
 
             // 如果是多源搜索且选择了 3 个源，调用聚合搜索接口
             if (state.isMultiSource && state.searchActiveSources.length === 3) {
-                merged = await MusicAPI.aggregateSearch(state.globalKeyword);
+                merged = await MusicAPI.aggregateSearch(state.globalKeyword, searchSignal);
             } else {
                 // 如果是单源或 2 个源，分别调用
+                // Initial search: 100 results, subsequent scroll: 20 more
+                const searchLimit = isAppend ? 20 : 100;
                 const promises = state.searchActiveSources.map(source =>
-                    MusicAPI.search(state.globalKeyword, source, state.searchPage)
-                        .catch(e => [])
+                    MusicAPI.search(state.globalKeyword, source, state.searchPage, searchLimit, searchSignal)
+                        .catch(e => {
+                            // Ignore abort errors
+                            if (e.name === 'AbortError') return [];
+                            return [];
+                        })
                 );
                 const results = await Promise.all(promises);
 
@@ -398,6 +441,9 @@ document.addEventListener('DOMContentLoaded', async () => {
             // Check if view changed during async operation
             if (thisRequestId !== currentViewRequestId) return;
 
+            // Check if a newer search has started - if so, don't update UI
+            if (thisSearchId !== state.currentSearchId) return;
+
             // 严格去重逻辑
             const seenIds = new Set(isAppend ? state.globalResults.map(s => s.id) : []);
             const actuallyNew = merged.filter(song => {
@@ -414,16 +460,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             state.currentListData = state.globalResults;
 
+            // Fix for pagination: If we fetched 100 items initially (limit=100), 
+            // that's equivalent to 5 pages of standard 20-item limit.
+            // So we set searchPage to 5, ensuring next loadNextPage() requests page 6.
+            if (!isAppend && state.globalResults.length > 0) {
+                state.searchPage = Math.ceil(state.globalResults.length / 20);
+            }
+
             if (state.globalResults.length === 0) {
                 if (!isAppend) UI.renderEmptyState('没有找到相关歌曲');
                 return;
             }
 
+            // Display all results (initial load: 100, subsequent: 20 more each)
             UI.renderSongList(isAppend ? actuallyNew : state.globalResults, 1, 1, () => {
                 loadNextPage();
             }, false, 'search', null, isAppend);
         } catch (e) {
-            if (!isAppend) UI.renderEmptyState('搜索出错，请重试');
+            // Don't show error for aborted requests
+            if (e.name !== 'AbortError') {
+                if (!isAppend) UI.renderEmptyState('搜索出错，请重试');
+            }
         } finally {
             state.isLoadingMore = false;
             UI.setLoadingMore(false);
@@ -433,6 +490,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     function loadNextPage() {
         if (state.isLoadingMore) return;
         if (state.currentView === 'search' && state.globalKeyword) {
+            // Load 20 more results from API
             state.searchPage++;
             doGlobalSearch(true);
         } else if (state.currentView === 'hot') {
@@ -501,6 +559,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             updateSourceChips();
             if (state.currentView === 'search' && state.globalKeyword) {
+                // Abort pending search before starting new one
+                if (currentSearchController) {
+                    currentSearchController.abort();
+                    currentSearchController = null;
+                }
                 state.searchPage = 1;
                 doGlobalSearch();
             }
@@ -554,6 +617,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             updateSourceChips();
             if (state.currentView === 'search' && state.globalKeyword) {
+                // Abort pending search before starting new one
+                if (currentSearchController) {
+                    currentSearchController.abort();
+                    currentSearchController = null;
+                }
                 state.searchPage = 1;
                 doGlobalSearch();
             }

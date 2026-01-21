@@ -75,6 +75,7 @@
 | **UI** | Flexbox, Grid, FontAwesome 图标 |
 | **后端** | Cloudflare Workers |
 | **数据库** | Cloudflare D1 (SQLite) |
+| **音乐API** | [TuneHub API](https://api.tunefree.fun/) |
 | **API代理** | 多重跨域代理，确保音频稳定加载 |
 | **部署** | GitHub Pages + Cloudflare Workers |
 
@@ -139,9 +140,10 @@ musicsquare/
 
 ## 🙏 致谢
 
+- [TuneHub API](https://api.tunefree.fun/) - 音乐数据接口
 - [FontAwesome](https://fontawesome.com/) - 图标库
 - [Cloudflare](https://cloudflare.com/) - 边缘计算平台
-- 各音乐平台 API 提供方
+- [GitHub Pages](https://pages.github.com/) - 静态网站托管
 
 ---
 

@@ -9,6 +9,23 @@ const MusicAPI = {
 
     searchCache: new Map(),
 
+    // Quality preference - determines starting point for quality degradation
+    // Options: 'flac24bit', 'flac', '320k', '128k'
+    get preferredQuality() {
+        return localStorage.getItem('preferredQuality') || 'flac24bit';
+    },
+    set preferredQuality(val) {
+        localStorage.setItem('preferredQuality', val);
+    },
+
+    // Build quality array starting from preferred quality
+    getQualityChain(preferred) {
+        const allQualities = ['flac24bit', 'flac', '320k', '128k'];
+        const idx = allQualities.indexOf(preferred);
+        if (idx === -1) return allQualities; // fallback to all
+        return allQualities.slice(idx); // from preferred onwards
+    },
+
     getProxyUrl(url, source = null) {
         if (!url) return url;
         const PROXY_BASE = 'https://api.yexin.de5.net/api/proxy?url=';
@@ -42,7 +59,7 @@ const MusicAPI = {
         return url;
     },
 
-    async search(keyword, source, page = 1, limit = 20) {
+    async search(keyword, source, page = 1, limit = 20, signal = null) {
         if (!keyword) return [];
 
         const cacheKey = `${source}:${keyword}:${page}:${limit}`;
@@ -52,7 +69,8 @@ const MusicAPI = {
 
         try {
             const url = `${this.endpoints.base}?source=${source}&type=search&keyword=${encodeURIComponent(keyword)}&page=${page}&limit=${limit}`;
-            const res = await fetch(url);
+            const fetchOptions = signal ? { signal } : {};
+            const res = await fetch(url, fetchOptions);
 
             // Handle network errors
             if (!res.ok) {
@@ -112,6 +130,10 @@ const MusicAPI = {
 
             return results;
         } catch (e) {
+            // Silently ignore aborted requests (user switched sources)
+            if (e.name === 'AbortError') {
+                return [];
+            }
             const srcMap = { 'netease': '网易', 'qq': 'QQ', 'kuwo': '酷我' };
             const srcName = srcMap[source] || source;
             console.error(`搜索 "${keyword}" 失败:`, e.message);
@@ -122,11 +144,12 @@ const MusicAPI = {
         }
     },
 
-    async aggregateSearch(keyword) {
+    async aggregateSearch(keyword, signal = null) {
         if (!keyword) return [];
         try {
             const url = `${this.endpoints.base}?type=aggregateSearch&keyword=${encodeURIComponent(keyword)}`;
-            const res = await fetch(url);
+            const fetchOptions = signal ? { signal } : {};
+            const res = await fetch(url, fetchOptions);
             const json = await res.json();
 
             const list = json.data.results || json.data.list || (Array.isArray(json.data) ? json.data : []);
@@ -157,6 +180,10 @@ const MusicAPI = {
                 };
             }).filter(s => s.songId);
         } catch (e) {
+            // Silently ignore aborted requests (user switched sources)
+            if (e.name === 'AbortError') {
+                return [];
+            }
             console.error(`Aggregate search error:`, e);
             return [];
         }
@@ -185,10 +212,16 @@ const MusicAPI = {
                 track.url = this.getProxyUrl(existingUrl, track.source);
                 track.cover = track.cover || (track.originalData && track.originalData.pic) || '';
                 track.lrc = track.lrc || (track.originalData && track.originalData.lrc) || '';
+
+                // For Kuwo, ensure cover uses API proxy for consistency
+                const sid = track.songId || (track.id && String(track.id).includes('-') ? String(track.id).split('-')[1] : track.id);
+                if (track.source === 'kuwo' && sid) {
+                    // Always use API proxy for Kuwo covers to ensure they load correctly
+                    track.cover = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
+                }
             } else {
-                // Automatic quality degradation: try one by one (sequential, not parallel)
-                // flac24bit → flac → 320k → 128k
-                const qualities = ['flac24bit', 'flac', '320k', '128k'];
+                // Automatic quality degradation: start from preferred quality
+                const qualities = this.getQualityChain(this.preferredQuality);
                 let detailData = null;
 
                 const sid = track.songId || (track.id && String(track.id).includes('-') ? String(track.id).split('-')[1] : track.id);
@@ -238,10 +271,13 @@ const MusicAPI = {
 
                     // If we got URL but missing cover/lrc, fetch them separately
                     if (detailData && sid) {
-                        // Fetch cover if missing
+                        // Fetch cover if missing - for Kuwo always use API proxy
                         if (!detailData.pic && !track.cover) {
                             const picUrl = `${this.endpoints.base}?source=${track.source}&id=${sid}&type=pic`;
                             track.cover = picUrl; // Use API as proxy for cover
+                        } else if (track.source === 'kuwo' && sid) {
+                            // For Kuwo, always use API proxy even if we have a cover
+                            track.cover = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
                         }
                         // Fetch lyrics if missing
                         if (!detailData.lrc && !track.lrc) {

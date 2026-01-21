@@ -52,6 +52,7 @@ const UI = {
 
         this.bindSelectionMode();
         this.bindEffectDropdown();
+        this.bindQualityDropdown();
 
         // Sync Playlist Binding
         const syncBtn = document.getElementById('sync-pl-btn');
@@ -253,6 +254,43 @@ const UI = {
         });
     },
 
+    bindQualityDropdown() {
+        const btn = document.getElementById('quality-btn');
+        const menu = document.getElementById('quality-menu');
+        if (!btn || !menu) return;
+
+        // Initialize from saved preference
+        const saved = MusicAPI.preferredQuality;
+        const labels = { '128k': '标准音质', '320k': '高品质', 'flac': '无损音质', 'flac24bit': 'Hi-Res' };
+        btn.textContent = labels[saved] || '高品质';
+        menu.querySelectorAll('.effect-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.quality === saved);
+        });
+
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            menu.classList.toggle('show');
+        });
+
+        menu.querySelectorAll('.effect-item').forEach(item => {
+            item.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const quality = item.dataset.quality;
+                MusicAPI.preferredQuality = quality;
+                btn.textContent = item.textContent;
+                menu.classList.remove('show');
+                menu.querySelectorAll('.effect-item').forEach(i => i.classList.remove('active'));
+                item.classList.add('active');
+                this.showToast(`音质已切换为: ${item.textContent}`, 'success');
+            });
+        });
+
+        document.addEventListener('click', () => {
+            menu.classList.remove('show');
+        });
+    },
+
     bindGlobalClickEvents() {
         document.addEventListener('click', (e) => {
             const songMenu = document.getElementById('song-ctx-menu');
@@ -342,8 +380,16 @@ const UI = {
         });
 
         const toggleOverlay = () => {
-            if (this.overlay.classList.contains('active')) this.overlay.classList.remove('active');
-            else this.overlay.classList.add('active');
+            if (this.overlay.classList.contains('active')) {
+                this.overlay.classList.remove('active');
+            } else {
+                this.overlay.classList.add('active');
+                // Fix: Force scroll to current lyric when opening player
+                if (window.player && typeof window.player.lyricIndex === 'number' && window.player.lyricIndex >= 0) {
+                    // Small delay to ensure transition starts/layout updates
+                    setTimeout(() => this.highlightLyric(window.player.lyricIndex), 100);
+                }
+            }
         };
         const wrapper = document.getElementById('cover-wrapper');
         const info = document.getElementById('player-info-area');
@@ -996,7 +1042,9 @@ const UI = {
 
     highlightPlayingByID(id) {
         if (!id) return;
-        const items = document.querySelectorAll('.song-item');
+        // Only highlight within the current song list container to avoid multiple highlights
+        const container = this.songListContainer || document;
+        const items = container.querySelectorAll('.song-item');
         const sid = String(id);
         items.forEach((el) => {
             if (el.dataset.id === sid) {
