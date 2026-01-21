@@ -579,8 +579,18 @@ const UI = {
                 setLoading(true);
                 const plIds = [...selectedPls];
                 try {
-                    for (const plId of plIds) await DataService.addBatchSongsToPlaylist(plId, songs);
-                    this.showToast(`成功添加至 ${plIds.length} 个歌单`, 'success');
+                    let totalAdded = 0;
+                    for (const plId of plIds) {
+                        const count = await DataService.addBatchSongsToPlaylist(plId, songs);
+                        totalAdded += count;
+                    }
+
+                    if (totalAdded === 0) {
+                        this.showToast(songs.length === 1 ? '该歌曲已在歌单中' : '所选歌曲均已在歌单中', 'info');
+                    } else {
+                        this.showToast(`成功添加 ${totalAdded} 首歌曲至 ${plIds.length} 个歌单`, 'success');
+                    }
+
                     this.selectedSongs.clear();
                     this.updateBatchBar();
                     document.querySelectorAll('.song-checkbox').forEach(c => c.checked = false);
@@ -912,7 +922,7 @@ const UI = {
                     window.player.setPlaylist(window.appState ? window.appState.currentListData : songs, -1, song.id || song.uid);
                 }
             };
-            if (window.player && window.player.currentTrack && window.player.currentTrack.id === song.id) div.classList.add('playing');
+            if (window.player && window.player.currentTrack && (window.player.currentTrack.id === song.id || (song.uid && window.player.currentTrack.uid === song.uid))) div.classList.add('playing');
             if (song.unplayable) div.classList.add('unplayable');
 
             const isFav = DataService.isFavorite(song);
@@ -974,7 +984,7 @@ const UI = {
         });
 
         this._onLoadMore = onMore;
-        if (window.player && window.player.currentTrack) this.highlightPlayingByID(window.player.currentTrack.id);
+        if (window.player && window.player.currentTrack) this.highlightPlayingByID(window.player.currentTrack.id, window.player.currentTrack.uid);
     },
 
     toggleFavorite(song, btnEl) {
@@ -1040,17 +1050,18 @@ const UI = {
         };
     },
 
-    highlightPlayingByID(id) {
-        if (!id) return;
+    highlightPlayingByID(id, uid) {
+        if (!id && !uid) return;
         // Only highlight within the current song list container to avoid multiple highlights
         const container = this.songListContainer || document;
         const items = container.querySelectorAll('.song-item');
-        const sid = String(id);
+        const sid = id ? String(id) : null;
+        const suid = uid ? String(uid) : null;
         items.forEach((el) => {
-            if (el.dataset.id === sid) {
+            if ((sid && el.dataset.id === sid) || (suid && el.dataset.id === suid)) {
                 el.classList.add('playing');
                 // Ensure it's scrolled into view if needed
-                // el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             } else {
                 el.classList.remove('playing');
             }

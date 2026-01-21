@@ -281,7 +281,7 @@ class MusicPlayer {
                 this.currentIndex = idx;
             }
             // Always highlight by ID for reliable highlighting regardless of source (nextQueue, playlist, etc.)
-            UI.highlightPlayingByID(track.id);
+            UI.highlightPlayingByID(track.id, track.uid);
             return true;
         } catch (e) {
             console.error("Play failed", e);

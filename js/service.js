@@ -440,7 +440,7 @@ const DataService = {
 
         // Filter duplicates
         const newSongs = songs.filter(s => !pl.tracks.some(t => t.id === s.id));
-        if (newSongs.length === 0) return true;
+        if (newSongs.length === 0) return 0;
 
         // Optimistic - add to top (Reverse to preserve newest-first)
         // If songs is [Old, ..., New], we want [New, ..., Old] at top.
@@ -457,7 +457,7 @@ const DataService = {
             });
             if (!res.ok) throw new Error('Batch add songs failed');
             this.fetchPlaylists(); // Refresh to sync
-            return true;
+            return newSongs.length;
         } catch (e) {
             console.error('Batch Add Songs Error:', e);
             this.fetchPlaylists(); // Refresh to sync
