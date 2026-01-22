@@ -106,11 +106,12 @@ const MusicAPI = {
                 const sid = String(item.id || item.songid || item.mid || '');
                 const src = item.platform || item.source || source;
                 let coverUrl = item.pic || item.cover || item.image || '';
-                // Use dedicated API proxy for Kuwo covers to avoid anti-leech/mixed content
-                if (src === 'kuwo' && sid) {
-                    coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
-                } else if (coverUrl) {
+                // Prefer raw URL + getProxyUrl over the redirector to avoid nested SSL issues
+                if (coverUrl) {
                     coverUrl = this.getProxyUrl(coverUrl, src);
+                } else if (src === 'kuwo' && sid) {
+                    // Fallback to redirector only if no raw URL is available
+                    coverUrl = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, src);
                 }
                 return {
                     id: `${src}-${sid}`,
@@ -166,11 +167,11 @@ const MusicAPI = {
                 const sid = String(item.id || item.songid || item.mid || '');
                 const src = item.platform || item.source || 'netease';
                 let coverUrl = item.pic || item.cover || '';
-                // Use dedicated API proxy for Kuwo covers to avoid anti-leech
-                if (src === 'kuwo' && sid) {
-                    coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
-                } else if (coverUrl) {
+                // Prefer raw URL + getProxyUrl
+                if (coverUrl) {
                     coverUrl = this.getProxyUrl(coverUrl, src);
+                } else if (src === 'kuwo' && sid) {
+                    coverUrl = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, src);
                 }
                 return {
                     id: `${src}-${sid}`,
@@ -219,15 +220,16 @@ const MusicAPI = {
             // If we have an existing URL, use it directly (no need to try higher qualities)
             if (existingUrl) {
                 track.url = this.getProxyUrl(existingUrl, track.source);
-                track.cover = this.getProxyUrl(track.cover || (track.originalData && track.originalData.pic) || '', track.source);
-                track.lrc = track.lrc || (track.originalData && track.originalData.lrc) || '';
+                let rawCover = track.cover || (track.originalData && track.originalData.pic) || '';
 
-                // For Kuwo, ensure cover uses API proxy for consistency
+                // For Kuwo, prioritizing the proxy logic that handles SSL issues
                 const sid = track.songId || (track.id && String(track.id).includes('-') ? String(track.id).split('-')[1] : track.id);
-                if (track.source === 'kuwo' && sid) {
-                    // Always use API proxy for Kuwo covers to ensure they load correctly
-                    track.cover = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
+                if (track.source === 'kuwo' && sid && !rawCover) {
+                    track.cover = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, track.source);
+                } else {
+                    track.cover = this.getProxyUrl(rawCover, track.source);
                 }
+                track.lrc = track.lrc || (track.originalData && track.originalData.lrc) || '';
             } else {
                 // Automatic quality degradation: start from preferred quality
                 const qualities = this.getQualityChain(this.preferredQuality);
@@ -280,13 +282,12 @@ const MusicAPI = {
 
                     // If we got URL but missing cover/lrc, fetch them separately
                     if (detailData && sid) {
-                        // Fetch cover if missing - for Kuwo always use API proxy
+                        // Fetch cover if missing
                         if (!detailData.pic && !track.cover) {
-                            const picUrl = `${this.endpoints.base}?source=${track.source}&id=${sid}&type=pic`;
-                            track.cover = picUrl; // Use API as proxy for cover
+                            track.cover = this.getProxyUrl(`${this.endpoints.base}?source=${track.source}&id=${sid}&type=pic`, track.source);
                         } else if (track.source === 'kuwo' && sid) {
-                            // For Kuwo, always use API proxy even if we have a cover
-                            track.cover = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
+                            // For Kuwo, prioritize proxying the raw cover we found
+                            track.cover = this.getProxyUrl(detailData.pic || track.cover, track.source);
                         }
                         // Fetch lyrics if missing
                         if (!detailData.lrc && !track.lrc) {
@@ -372,11 +373,11 @@ const MusicAPI = {
                         const sid = String(s.id || s.songid || s.mid || '');
                         const src = s.platform || s.source || source;
                         let coverUrl = s.pic || s.cover || '';
-                        // Use dedicated API proxy for Kuwo covers
-                        if (src === 'kuwo' && sid) {
-                            coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
-                        } else if (coverUrl) {
+                        // Prefer raw URL + getProxyUrl over the redirector
+                        if (coverUrl) {
                             coverUrl = this.getProxyUrl(coverUrl, src);
+                        } else if (src === 'kuwo' && sid) {
+                            coverUrl = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, src);
                         }
                         return {
                             id: `${src}-${sid}`,
@@ -438,13 +439,13 @@ const MusicAPI = {
 
                 return list.map(s => {
                     const sid = String(s.id || s.songid || s.mid || '');
-                    // For Kuwo, use API proxy for cover images to bypass CORS
+                    // For Kuwo, use API proxy or raw URL + getProxyUrl
                     let coverUrl = s.pic || s.cover || '';
                     if (source === 'kuwo') {
-                        if (sid) {
-                            coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
-                        } else if (coverUrl) {
+                        if (coverUrl) {
                             coverUrl = this.getProxyUrl(coverUrl, source);
+                        } else if (sid) {
+                            coverUrl = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, source);
                         }
                     }
                     return {

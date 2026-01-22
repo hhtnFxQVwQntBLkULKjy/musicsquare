@@ -1102,7 +1102,11 @@ const UI = {
     updatePlayerInfo(track) {
         this.playerTitle.textContent = track.title;
         this.playerArtist.textContent = track.artist;
-        const cover = track.cover || 'https://placehold.co/60x60?text=Music';
+        let cover = track.cover || 'https://placehold.co/60x60?text=Music';
+        // Final safety check to ensure image is proxied
+        if (window.MusicAPI && typeof MusicAPI.getProxyUrl === 'function' && cover.startsWith('http')) {
+            cover = MusicAPI.getProxyUrl(cover, track.source);
+        }
         this.playerCover.src = cover;
         document.getElementById('overlay-cover').src = cover;
     },
