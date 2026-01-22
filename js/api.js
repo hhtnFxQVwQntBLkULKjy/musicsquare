@@ -30,12 +30,14 @@ const MusicAPI = {
         if (!url) return url;
         const PROXY_BASE = 'https://api.yexin.de5.net/api/proxy?url=';
 
-        // Fix: Force HTTPS for common music domains to prevent mixed content on GitHub Pages
-        if (url.startsWith('http://')) {
-            const secureUrl = url.replace('http://', 'https://');
-            if (url.includes('music.126.net') || url.includes('qq.com') || url.includes('kuwo.cn')) {
-                url = secureUrl;
-            }
+        // Force HTTPS for NetEase and QQ (they have valid certs)
+        if (url.startsWith('http://') && (url.includes('music.126.net') || url.includes('qq.com'))) {
+            url = url.replace('http://', 'https://');
+        }
+
+        // For Kuwo, Force HTTP when sending to proxy because their SSL cert is broken (fixes 526 errors)
+        if (url.includes('kuwo.cn') && url.startsWith('https://')) {
+            url = url.replace('https://', 'http://');
         }
 
         if (url.startsWith(PROXY_BASE) ||
@@ -47,18 +49,13 @@ const MusicAPI = {
             return url;
         }
 
-        // Always proxy Kuwo images to fix certificate errors and anti-leech
-        if (url.includes('kuwo.cn')) {
-            return PROXY_BASE + encodeURIComponent(url);
-        }
-
         // Check if URL needs proxy based on domain patterns
         const needProxyByDomain = url.includes('126.net') ||
             url.includes('qq.com') ||
             url.includes('kuwo.cn') ||
             url.includes('sycdn.kuwo.cn');
 
-        // Check if it's an API URL for kuwo source (these redirect to CORS-blocked CDN)
+        // Check if it's an API URL for kuwo source
         const isKuwoApiUrl = url.includes('source=kuwo') || source === 'kuwo';
 
         if (needProxyByDomain || isKuwoApiUrl) {
@@ -222,7 +219,7 @@ const MusicAPI = {
             // If we have an existing URL, use it directly (no need to try higher qualities)
             if (existingUrl) {
                 track.url = this.getProxyUrl(existingUrl, track.source);
-                track.cover = track.cover || (track.originalData && track.originalData.pic) || '';
+                track.cover = this.getProxyUrl(track.cover || (track.originalData && track.originalData.pic) || '', track.source);
                 track.lrc = track.lrc || (track.originalData && track.originalData.lrc) || '';
 
                 // For Kuwo, ensure cover uses API proxy for consistency
@@ -301,7 +298,7 @@ const MusicAPI = {
 
                 if (detailData) {
                     track.url = this.getProxyUrl(detailData.url, track.source);
-                    track.cover = detailData.pic || track.cover;
+                    track.cover = this.getProxyUrl(detailData.pic || track.cover, track.source);
                     track.lrc = detailData.lrc || track.lrc;
                 }
             }
