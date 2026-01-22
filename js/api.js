@@ -30,6 +30,14 @@ const MusicAPI = {
         if (!url) return url;
         const PROXY_BASE = 'https://api.yexin.de5.net/api/proxy?url=';
 
+        // Fix: Force HTTPS for common music domains to prevent mixed content on GitHub Pages
+        if (url.startsWith('http://')) {
+            const secureUrl = url.replace('http://', 'https://');
+            if (url.includes('music.126.net') || url.includes('qq.com') || url.includes('kuwo.cn')) {
+                url = secureUrl;
+            }
+        }
+
         if (url.startsWith(PROXY_BASE) ||
             url.includes('localhost') ||
             url.includes('127.0.0.1')) return url;
@@ -39,8 +47,8 @@ const MusicAPI = {
             return url;
         }
 
-        // Always proxy Kuwo images to fix certificate errors
-        if (url.includes('kwcdn.kuwo.cn')) {
+        // Always proxy Kuwo images to fix certificate errors and anti-leech
+        if (url.includes('kuwo.cn')) {
             return PROXY_BASE + encodeURIComponent(url);
         }
 
@@ -101,8 +109,10 @@ const MusicAPI = {
                 const sid = String(item.id || item.songid || item.mid || '');
                 const src = item.platform || item.source || source;
                 let coverUrl = item.pic || item.cover || item.image || '';
-                // Proxy Kuwo images to fix certificate errors
-                if (src === 'kuwo' && coverUrl) {
+                // Use dedicated API proxy for Kuwo covers to avoid anti-leech/mixed content
+                if (src === 'kuwo' && sid) {
+                    coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
+                } else if (coverUrl) {
                     coverUrl = this.getProxyUrl(coverUrl, src);
                 }
                 return {
@@ -159,8 +169,10 @@ const MusicAPI = {
                 const sid = String(item.id || item.songid || item.mid || '');
                 const src = item.platform || item.source || 'netease';
                 let coverUrl = item.pic || item.cover || '';
-                // Proxy Kuwo images to fix certificate errors
-                if (src === 'kuwo' && coverUrl) {
+                // Use dedicated API proxy for Kuwo covers to avoid anti-leech
+                if (src === 'kuwo' && sid) {
+                    coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
+                } else if (coverUrl) {
                     coverUrl = this.getProxyUrl(coverUrl, src);
                 }
                 return {
@@ -363,8 +375,10 @@ const MusicAPI = {
                         const sid = String(s.id || s.songid || s.mid || '');
                         const src = s.platform || s.source || source;
                         let coverUrl = s.pic || s.cover || '';
-                        // Proxy Kuwo images to fix certificate errors
-                        if (src === 'kuwo' && coverUrl) {
+                        // Use dedicated API proxy for Kuwo covers
+                        if (src === 'kuwo' && sid) {
+                            coverUrl = `${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`;
+                        } else if (coverUrl) {
                             coverUrl = this.getProxyUrl(coverUrl, src);
                         }
                         return {
