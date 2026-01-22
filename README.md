@@ -144,6 +144,7 @@ README 中的默认 API 代理地址仅供演示，**严禁滥用**。若发现�
 - [FontAwesome](https://fontawesome.com/) - 图标库
 - [Cloudflare](https://cloudflare.com/) - 边缘计算平台
 - [GitHub Pages](https://pages.github.com/) - 静态网站托管
+- [原生项目](https://github.com/CharlesPikachu/musicsquare) - 简易轻量音乐平台
 
 ---
 
