@@ -243,8 +243,7 @@ const DataService = {
                 headers: this.authHeader
             });
             if (res.ok) {
-                // Reverse to show newest first
-                this.favorites = (await res.json()).reverse();
+                this.favorites = await res.json();
             }
         } catch (e) {
             console.error('Fetch Favorites Error:', e);
@@ -261,9 +260,9 @@ const DataService = {
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
                 body: JSON.stringify(this.cleanSong(song))
             });
+            document.dispatchEvent(new CustomEvent('favorites-updated'));
         } catch (e) {
             console.error('Add Favorite Error:', e);
-            // Revert on error?
         }
     },
 
@@ -333,11 +332,9 @@ const DataService = {
                 headers: this.authHeader
             });
             if (res.ok) {
-                this.playlists = await res.json();
-                // Reverse tracks for each playlist to show newest first
-                this.playlists.forEach(pl => {
-                    if (pl.tracks) pl.tracks.reverse();
-                });
+                const list = await res.json();
+                // Everything is already sorted DESC by backend
+                this.playlists = list;
             }
         } catch (e) {
             console.error('Fetch Playlists Error:', e);
@@ -402,7 +399,7 @@ const DataService = {
         // Check for duplicate using both id and uid
         if (pl.tracks.some(t => (song.id && t.id === song.id) || (song.uid && t.uid === song.uid))) return false;
 
-        // Optimistic update - add to top
+        // Optimistic update - add to top for DESC newest-first order
         const tempTrack = { ...song };
         pl.tracks.unshift(tempTrack);
 
@@ -442,12 +439,8 @@ const DataService = {
         const newSongs = songs.filter(s => !pl.tracks.some(t => t.id === s.id));
         if (newSongs.length === 0) return 0;
 
-        // Optimistic - add to top (Reverse to preserve newest-first)
-        // If songs is [Old, ..., New], we want [New, ..., Old] at top.
-        // unshift(...songs) puts songs[0] at top.
-        // So we reverse first.
-        const reversedSongs = [...newSongs].reverse();
-        pl.tracks.unshift(...reversedSongs);
+        // Optimistic - add to top for DESC newest-first order
+        pl.tracks.unshift(...newSongs);
 
         try {
             const res = await fetch(`${API_BASE}/playlists/batch-songs`, {
@@ -510,7 +503,10 @@ const DataService = {
     async fetchHistory() {
         try {
             const res = await fetch(`${API_BASE}/history`, { headers: this.authHeader });
-            if (res.ok) return await res.json();
+            if (res.ok) {
+                const data = await res.json();
+                return data;
+            }
         } catch (e) {
             console.error('Fetch History Error:', e);
         }
@@ -524,6 +520,7 @@ const DataService = {
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
                 body: JSON.stringify(this.cleanSong(song))
             });
+            document.dispatchEvent(new CustomEvent('history-updated'));
         } catch (e) { console.error('Add History Error:', e); }
     },
 

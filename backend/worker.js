@@ -500,7 +500,8 @@ export default {
                                             url: s.url,
                                             lrc: s.lrc
                                         };
-                                        batch.push(stmt.bind(plRes.meta.last_row_id, JSON.stringify(songObj), Date.now()));
+                                        // Use decreasing timestamps to preserve order in DESC sort
+                                        batch.push(stmt.bind(plRes.meta.last_row_id, JSON.stringify(songObj), Date.now() - batch.length));
                                         if (batch.length >= 50) break; // Limit 50 songs per playlist to prevent timeout
                                     }
                                     if (batch.length > 0) await env.DB.batch(batch);
@@ -523,7 +524,7 @@ export default {
             if (!userId) return error("Unauthorized", 401);
 
             const { results } = await env.DB.prepare(
-                "SELECT * FROM playlists WHERE user_id = ? ORDER BY is_sync ASC, created_at DESC"
+                "SELECT * FROM playlists WHERE user_id = ? ORDER BY created_at DESC"
             ).bind(userId).all();
 
             const playlists = [];
@@ -532,7 +533,7 @@ export default {
                 // Let's fetch songs for local playlists. For synced, we might rely on lazy load or stored.
                 // For now, fetch all stored songs.
                 const { results: songs } = await env.DB.prepare(
-                    "SELECT id, song_json FROM playlist_songs WHERE playlist_id = ? ORDER BY created_at ASC"
+                    "SELECT id, song_json FROM playlist_songs WHERE playlist_id = ? ORDER BY created_at DESC"
                 ).bind(pl.id).all();
 
                 playlists.push({
@@ -618,7 +619,7 @@ export default {
                 if (!dbMap.has(s.id)) {
                     delete s.url;
                     if (typeof s.lrc === 'string' && s.lrc.startsWith('http')) delete s.lrc;
-                    batch.push(env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES (?, ?, 0, ?)").bind(playlistId, JSON.stringify(s), Date.now()));
+                    batch.push(env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES (?, ?, 0, ?)").bind(playlistId, JSON.stringify(s), Date.now() - batch.length));
                 }
             }
 

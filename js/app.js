@@ -14,7 +14,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     try {
         const history = await DataService.fetchHistory();
         if (history && history.length > 0) {
-            player.historyStack = history.slice(0, 100);
+            // Reverse DESC backend data to [Oldest, ..., Newest] so pop() gets Newest
+            player.historyStack = history.reverse().slice(-100);
         }
     } catch (e) {
         console.error('Failed to load history:', e);
@@ -103,13 +104,19 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Search abort controller to cancel pending searches when switching sources
     let currentSearchController = null;
 
-    // Listen for favorites update event
     document.addEventListener('favorites-updated', async () => {
         if (state.currentView === 'favorites') {
             await DataService.fetchFavorites();
-            const favs = DataService.favorites;
-            state.currentListData = favs;
-            UI.renderSongList(favs, 1, 1, null, true, 'favorites');
+            UI.renderSongList(DataService.favorites, 1, 1, null, true, 'favorites');
+        }
+    });
+
+    // Listen for history update event
+    document.addEventListener('history-updated', async () => {
+        if (state.currentView === 'history') {
+            const history = await DataService.fetchHistory();
+            state.currentListData = history;
+            UI.renderSongList(history, 1, 1, null, true, 'history');
         }
     });
 
@@ -221,9 +228,11 @@ document.addEventListener('DOMContentLoaded', async () => {
                 searchInput.value = '';
                 searchInput.placeholder = '搜索历史...';
             }
-            const history = player.historyStack.slice().reverse();
+            UI.showLoading();
+            const history = await DataService.fetchHistory();
             state.currentListData = history;
-            if (history.length > 0) {
+            UI.hideLoading();
+            if (history && history.length > 0) {
                 UI.renderSongList(history, 1, 1, null, true, 'history');
             } else {
                 UI.renderEmptyState('暂无播放历史');

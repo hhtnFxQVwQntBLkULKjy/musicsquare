@@ -12,6 +12,10 @@ class MusicPlayer {
         this.loadingTimer = null;
         this._lastErrorTime = 0; // 报错截流
 
+        // Shuffle state
+        this.shuffledIndices = [];
+        this.shuffledIndex = -1;
+
         // Audio Effects State
         this.audioCtx = null;
         this.effectMode = 'original';
@@ -363,7 +367,15 @@ class MusicPlayer {
 
         while (attempts < maxAttempts) {
             if (this.mode === 'shuffle') {
-                tryIndex = Math.floor(Math.random() * this.playlist.length);
+                if (this.shuffledIndices.length !== this.playlist.length) {
+                    this.generateShuffleIndices();
+                }
+                this.shuffledIndex++;
+                if (this.shuffledIndex >= this.shuffledIndices.length) {
+                    this.generateShuffleIndices();
+                    this.shuffledIndex = 0;
+                }
+                tryIndex = this.shuffledIndices[this.shuffledIndex];
             } else {
                 tryIndex++;
                 if (tryIndex >= this.playlist.length) tryIndex = 0;
@@ -381,6 +393,27 @@ class MusicPlayer {
         UI.showToast('没有可播放的歌曲', 'warning');
     }
 
+    generateShuffleIndices() {
+        const n = this.playlist.length;
+        this.shuffledIndices = Array.from({ length: n }, (_, i) => i);
+        // Fisher-Yates Shuffle
+        for (let i = n - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [this.shuffledIndices[i], this.shuffledIndices[j]] = [this.shuffledIndices[j], this.shuffledIndices[i]];
+        }
+
+        // If there's a current track, ensure it's not immediately repeated or sync its position
+        if (this.currentIndex !== -1) {
+            const pos = this.shuffledIndices.indexOf(this.currentIndex);
+            if (pos !== -1) {
+                // Move current track's index to the front of the shuffle so it continues from here
+                this.shuffledIndices.splice(pos, 1);
+                this.shuffledIndices.unshift(this.currentIndex);
+            }
+        }
+        this.shuffledIndex = 0;
+    }
+
     // Add song(s) to the "Play Next" queue
     addToNextQueue(songs) {
         if (!Array.isArray(songs)) songs = [songs];
@@ -390,6 +423,18 @@ class MusicPlayer {
     playPrev() {
         if (this.historyStack.length > 0) {
             const prevTrack = this.historyStack.pop();
+
+            // Sync shuffle state if we are in shuffle mode
+            if (this.mode === 'shuffle' && this.shuffledIndices.length > 0) {
+                const idxInPlaylist = this.playlist.findIndex(t => t.id === prevTrack.id || t.uid === prevTrack.uid);
+                if (idxInPlaylist !== -1) {
+                    const idxInShuffle = this.shuffledIndices.indexOf(idxInPlaylist);
+                    if (idxInShuffle !== -1) {
+                        this.shuffledIndex = idxInShuffle;
+                    }
+                }
+            }
+
             this.play(prevTrack, true);
             return;
         }
@@ -422,6 +467,15 @@ class MusicPlayer {
             if (idx !== -1) startIndex = idx;
         }
         this.currentIndex = startIndex;
+
+        // Reset or init shuffle order
+        if (this.mode === 'shuffle') {
+            this.generateShuffleIndices();
+        } else {
+            this.shuffledIndices = [];
+            this.shuffledIndex = -1;
+        }
+
         this.play(this.playlist[this.currentIndex]);
     }
 
