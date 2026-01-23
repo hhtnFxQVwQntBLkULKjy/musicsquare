@@ -1,5 +1,9 @@
 
-const API_BASE = 'https://api.yexin.de5.net/api';
+
+
+// 后端配置: 'cloudflare' (默认) 或 'java' (MySQL)
+const BACKEND_TYPE = 'cloudflare';
+const API_BASE = BACKEND_TYPE === 'java' ? 'http://localhost:8080/api' : 'https://api.yexin.de5.net/api';
 
 const AuthService = {
     get currentUser() {

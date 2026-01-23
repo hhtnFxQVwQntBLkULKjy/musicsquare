@@ -28,7 +28,7 @@ const MusicAPI = {
 
     getProxyUrl(url, source = null) {
         if (!url) return url;
-        const PROXY_BASE = 'https://api.yexin.de5.net/api/proxy?url=';
+        const PROXY_BASE = `${API_BASE}/proxy?url=`;
 
         // Force HTTPS for NetEase and QQ (they have valid certs)
         if (url.startsWith('http://') && (url.includes('music.126.net') || url.includes('qq.com'))) {
