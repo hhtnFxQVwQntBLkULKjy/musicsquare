@@ -12,7 +12,6 @@ const MusicAPI = {
         return q.includes('k') ? q : q + 'k';
     },
 
-    // 内部请求 TuneHub 接口
     async fetchTuneHub(path, options = {}) {
         const headers = {
             'X-API-Key': this.apiKey,
@@ -29,29 +28,23 @@ const MusicAPI = {
         if (this.searchCache.has(cacheKey)) return this.searchCache.get(cacheKey);
 
         try {
-            // 1. 获取下发配置
             const methodRes = await this.fetchTuneHub(`/v1/methods/${source}/search`);
             if (methodRes.code !== 0) return [];
             const config = methodRes.data;
 
-            // 2. 复杂的参数解析 (处理 {{...}} 里的计算逻辑)
             const queryParams = new URLSearchParams();
             for (let [key, value] of Object.entries(config.params || {})) {
                 let val = String(value);
                 if (val.includes('{{')) {
-                    // 替换基础变量
                     val = val.replace(/{{keyword}}/g, keyword)
                              .replace(/{{page}}/g, page)
                              .replace(/{{pageSize}}/g, limit)
                              .replace(/{{limit}}/g, limit);
                     
-                    // 处理里面的数学运算，例如 ((page-1)*20)
                     if (val.includes('{{')) {
                         val = val.replace(/{{(.+?)}}/g, (match, exp) => {
                             try {
-                                // 简单的逻辑转换，防止 eval 报错
-                                const safeExp = exp.replace(/\|\|/g, '||');
-                                return Function('page', 'limit', `return ${safeExp}`)(page, limit);
+                                return Function('page', 'limit', `return ${exp.replace(/\|\|/g, '||')}`)(page, limit);
                             } catch(e) { return 0; }
                         });
                     }
@@ -59,15 +52,12 @@ const MusicAPI = {
                 queryParams.append(key, val);
             }
 
-            // 3. 发起请求 (使用特定的代理或者直连)
             const targetUrl = `${config.url}${config.url.includes('?') ? '&' : '?'}${queryParams.toString()}`;
-            // 尝试直连，如果失败，UI 会报错。如果是 GitHub Pages，通常需要代理：
             const finalUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
 
             const res = await fetch(finalUrl, { method: config.method, headers: config.headers, signal });
             const json = await res.json();
 
-            // 4. 转换格式
             const results = this._transformList(json, source);
             this.searchCache.set(cacheKey, results);
             return results;
@@ -81,6 +71,26 @@ const MusicAPI = {
         const tasks = this.sources.map(src => this.search(keyword, src, 1, 20, signal));
         const all = await Promise.all(tasks);
         return all.flat();
+    },
+
+    // 重点修复：热门歌曲（排行榜）
+    async getBillboardList(source) {
+        try {
+            const res = await this.fetchTuneHub(`/v1/methods/${source}/toplists`);
+            // 确保返回的是数组，适配 ui.js 的 forEach 调用
+            if (res.code === 0 && Array.isArray(res.data)) {
+                return res.data.map(item => ({
+                    id: item.id || item.topId,
+                    name: item.name || item.title,
+                    pic: item.pic || item.cover,
+                    description: item.intro || ''
+                }));
+            }
+            return []; 
+        } catch (e) {
+            console.error("加载排行榜失败:", e);
+            return [];
+        }
     },
 
     // 解析播放地址
@@ -101,7 +111,7 @@ const MusicAPI = {
                 track.url = item.url;
                 track.cover = item.pic || track.cover;
                 track.lrc = item.lrc || '';
-                if (track.lrc.startsWith('http')) {
+                if (track.lrc && track.lrc.startsWith('http')) {
                     track.lrc = await this.fetchLrcText(track.lrc);
                 }
             }
@@ -109,7 +119,6 @@ const MusicAPI = {
         return track;
     },
 
-    // 辅助：获取歌词文本
     async fetchLrcText(url) {
         try {
             const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`);
@@ -117,9 +126,7 @@ const MusicAPI = {
         } catch (e) { return ''; }
     },
 
-    // 格式化输出，确保和原 UI 兼容
     _transformList(json, source) {
-        // 兼容新版 API 的各种数据嵌套层级
         const data = json.data || json;
         const list = data.list || data.results || data.songs || (Array.isArray(data) ? data : []);
         
@@ -129,7 +136,7 @@ const MusicAPI = {
                 id: `${source}-${sid}`,
                 songId: sid,
                 title: item.name || item.title || item.songname || '未知',
-                artist: item.artist || item.author || (item.singer?.[0]?.name) || '未知',
+                artist: item.artist || item.author || (item.singer?.[0]?.name) || '未知歌手',
                 album: item.album || item.albumname || '-',
                 cover: item.pic || item.cover || '',
                 source: source,
@@ -138,9 +145,8 @@ const MusicAPI = {
         }).filter(s => s.songId !== 'undefined');
     },
 
-    // 保持旧方法兼容
+    // 占位兼容
     getProxyUrl(url) { return url; },
-    async getBillboardList(source) { return []; },
     async getPlaylistSongs(source, id) { return { name: '歌单', tracks: [] }; },
     async searchNetease(k, p, l) { return this.search(k, 'netease', p, l); },
     async searchCommon(k, s, p, l) { return this.search(k, s, p, l); }
