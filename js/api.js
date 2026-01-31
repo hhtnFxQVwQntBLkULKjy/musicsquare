@@ -2,9 +2,10 @@ const MusicAPI = {
     // Configuration
     sources: ['netease', 'qq', 'kuwo'], // migu removed from active sources
 
-    // API Endpoints
+    // 新的 TuneHub V3 API 基础配置
     endpoints: {
-        base: 'https://music-dl.sayqz.com/api/',
+        base: 'https://tunehub.sayqz.com/api', // 新的 Base URL
+        apiKey: 'th_your_api_key_here' // 替换成你自己的 API Key（从 Linux DO 后台获取）
     },
 
     searchCache: new Map(),
