@@ -56,23 +56,34 @@ const MusicAPI = {
             queryParams.append(key, val);
         }
 
-        // 2. 拼接URL
+        // 2. 拼接原始目标 URL
         const separator = config.url.includes('?') ? '&' : '?';
         const targetUrl = `${config.url}${separator}${queryParams.toString()}`;
 
-        // 3. 走代理请求
-        // 轮询代理以防挂掉，优先用 corsproxy.io
-        const proxyBase = 'https://corsproxy.io/?url='; 
+        // 3. 构建代理请求
+        // 切换到 CodeTabs，这个代理目前对音乐平台通过率较高
+        const proxyBase = 'https://api.codetabs.com/v1/proxy?quest=';
         const finalUrl = proxyBase + encodeURIComponent(targetUrl);
+
+        // 4. 清洗浏览器禁止的请求头 (解决 CORS Preflight 报错)
+        const safeHeaders = {};
+        if (config.headers) {
+            const forbidden = ['referer', 'host', 'cookie', 'origin', 'user-agent', 'content-length'];
+            for (const [k, v] of Object.entries(config.headers)) {
+                if (!forbidden.includes(k.toLowerCase())) {
+                    safeHeaders[k] = v;
+                }
+            }
+        }
 
         try {
             const res = await fetch(finalUrl, {
                 method: config.method || 'GET',
-                headers: config.headers
+                headers: safeHeaders
             });
             return await res.json();
         } catch (e) {
-            console.error('代理请求失败:', e);
+            console.warn(`代理请求失败 [${config.url}]:`, e);
             return null;
         }
     },
@@ -90,7 +101,7 @@ const MusicAPI = {
 
             // 执行配置
             const json = await this._executeMethod(methodRes.data, {
-                keyword: encodeURIComponent(keyword), // 部分源需要再次编码
+                keyword: encodeURIComponent(keyword),
                 page: page,
                 pageSize: limit,
                 limit: limit
@@ -112,23 +123,18 @@ const MusicAPI = {
         return all.flat();
     },
 
-    // 2. 热门榜单 (修复：先拿配置，再拿数据)
+    // 2. 热门榜单
     async getBillboardList(source) {
         try {
             // 第一步：获取榜单的方法配置
             const methodRes = await this.fetchTuneHub(`/v1/methods/${source}/toplists`);
-            
-            // 如果拿不到配置，直接返回空数组
             if (methodRes.code !== 0 || !methodRes.data) return [];
 
-            // 第二步：执行这个配置，去真正的音乐平台拉取榜单列表
-            // toplists 通常不需要参数
+            // 第二步：执行配置
             const json = await this._executeMethod(methodRes.data, {});
-            
             if (!json) return [];
 
-            // 第三步：提取数据
-            // 兼容不同平台的返回结构 (data.list, data.results, or root array)
+            // 第三步：提取数据 (兼容多层级)
             const rawData = json.data?.list || json.data?.results || json.list || json || [];
             
             if (!Array.isArray(rawData)) return [];
@@ -146,17 +152,15 @@ const MusicAPI = {
         }
     },
 
-    // 3. 歌单详情 (修复：先拿配置，再拿数据)
+    // 3. 歌单详情
     async getPlaylistSongs(source, playlistId) {
         try {
             const methodRes = await this.fetchTuneHub(`/v1/methods/${source}/playlist`);
             if (methodRes.code !== 0 || !methodRes.data) return { name: '未知歌单', tracks: [] };
 
             const json = await this._executeMethod(methodRes.data, { id: playlistId });
-            
             if (!json) return { name: '加载失败', tracks: [] };
 
-            // 提取歌单信息和歌曲列表
             const info = json.data?.info || json.info || {};
             const tracks = this._transformList(json, source);
 
@@ -188,7 +192,6 @@ const MusicAPI = {
                 track.url = item.url;
                 track.cover = item.pic || track.cover;
                 track.lrc = item.lrc || '';
-                // 如果是http歌词链接，自动下载内容
                 if (track.lrc && track.lrc.startsWith('http')) {
                     track.lrc = await this.fetchLrcText(track.lrc);
                 }
@@ -199,14 +202,13 @@ const MusicAPI = {
 
     async fetchLrcText(url) {
         try {
-            const res = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(url)}`);
+            const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`);
             return await res.text();
         } catch (e) { return ''; }
     },
 
     // 数据清洗工具
     _transformList(json, source) {
-        // 尝试从各种可能的字段中找到歌曲列表
         const data = json.data || json;
         const list = data.list || data.results || data.songs || (Array.isArray(data) ? data : []);
         
