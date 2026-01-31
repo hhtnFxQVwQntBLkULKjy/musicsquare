@@ -5,7 +5,7 @@ const MusicAPI = {
     // 新的 TuneHub V3 API 配置（核心修改）
     endpoints: {
         base: 'https://tunehub.sayqz.com/api',
-        apiKey: 'th_your_api_key_here' // 👉 替换成你的真实 API Key
+        apiKey: 'th_9a7e8ecbe2028f7a7ba22e469694d6c10184ecf7797eae15' // 👉 替换成你的真实 API Key
     },
 
     searchCache: new Map(),
