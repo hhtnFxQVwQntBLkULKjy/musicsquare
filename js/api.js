@@ -2,16 +2,15 @@ const MusicAPI = {
     // Configuration
     sources: ['netease', 'qq', 'kuwo'], // migu removed from active sources
 
-    // ========== 核心修改1：替换新 API 配置 ==========
-    // 新的 TuneHub V3 API 基础配置
+    // 新的 TuneHub V3 API 配置（核心修改）
     endpoints: {
-        base: 'https://tunehub.sayqz.com/api', // 新的 Base URL
-        apiKey: 'th_9a7e8ecbe2028f7a7ba22e469694d6c10184ecf7797eae15' // 替换成你自己的 API Key（从 Linux DO 后台获取）
+        base: 'https://tunehub.sayqz.com/api',
+        apiKey: 'th_your_api_key_here' // 👉 替换成你的真实 API Key
     },
 
     searchCache: new Map(),
 
-    // Quality preference - 保持不变
+    // Quality preference - 保持原有逻辑
     get preferredQuality() {
         return localStorage.getItem('preferredQuality') || 'flac24bit';
     },
@@ -19,7 +18,7 @@ const MusicAPI = {
         localStorage.setItem('preferredQuality', val);
     },
 
-    // 保持不变
+    // 保持原有逻辑
     getQualityChain(preferred) {
         const allQualities = ['flac24bit', 'flac', '320k', '128k'];
         const idx = allQualities.indexOf(preferred);
@@ -27,14 +26,12 @@ const MusicAPI = {
         return allQualities.slice(idx);
     },
 
-    // ========== 核心修改2：更新代理逻辑（适配新 API） ==========
+    // 代理 URL 逻辑（适配新 API）
     getProxyUrl(url, source = null) {
         if (!url) return url;
-        // 新的代理 Base URL（如果你的 API_BASE 没定义，需要确认下项目里的定义，这里先兼容）
         const API_BASE = this.endpoints.base;
         const PROXY_BASE = `${API_BASE}/proxy?url=`;
 
-        // 原有逻辑保持不变
         if (url.startsWith('http://') && (url.includes('music.126.net') || url.includes('qq.com'))) {
             url = url.replace('http://', 'https://');
         }
@@ -62,7 +59,7 @@ const MusicAPI = {
         return url;
     },
 
-    // ========== 核心修改3：通用请求头（所有新 API 都需要） ==========
+    // ========== 新增：通用鉴权头 ==========
     getCommonHeaders() {
         return {
             'Content-Type': 'application/json',
@@ -70,7 +67,13 @@ const MusicAPI = {
         };
     },
 
-    // ========== 核心修改4：适配新 API 的“方法下发” - 获取请求配置 ==========
+    // ========== 新增：跨域代理（解决 CORS 报错） ==========
+    getCorsProxyUrl(targetUrl) {
+        // 稳定的免费跨域代理，优先用这个
+        return `https://corsproxy.io/?${new URLSearchParams({ url: targetUrl })}`;
+    },
+
+    // ========== 方法下发：获取配置（修复模板变量） ==========
     async getMethodConfig(platform, func) {
         try {
             const url = `${this.endpoints.base}/v1/methods/${platform}/${func}`;
@@ -89,7 +92,7 @@ const MusicAPI = {
         }
     },
 
-    // ========== 核心修改5：替换旧的 search 方法（适配方法下发） ==========
+    // ========== 搜索功能（修复跨域+模板变量） ==========
     async search(keyword, source, page = 1, limit = 20, signal = null) {
         if (!keyword) return [];
 
@@ -99,21 +102,23 @@ const MusicAPI = {
         }
 
         try {
-            // Step 1: 获取搜索方法配置
+            // Step 1: 获取搜索配置
             const config = await this.getMethodConfig(source, 'search');
             if (!config) return [];
 
-            // Step 2: 替换模板变量（page 从 0 开始，旧代码是从 1 开始，需要转换）
-            const pageNum = page - 1; // 新 API 的 page 是 0 起始
+            // Step 2: 修复模板变量替换（兼容所有 {{}} 写法）
+            const pageNum = page - 1;
             const replacedParams = {};
             for (const [key, value] of Object.entries(config.params || {})) {
-                replacedParams[key] = value
-                    .replace('{{keyword}}', encodeURIComponent(keyword))
-                    .replace('{{page}}', pageNum.toString())
-                    .replace('{{pageSize}}', limit.toString());
+                let replacedValue = value;
+                // 兼容 {{keyword}} / {keyword} / keyword 等写法
+                replacedValue = replacedValue.replace(/\{\{keyword\}\}|\{keyword\}|keyword/g, encodeURIComponent(keyword));
+                replacedValue = replacedValue.replace(/\{\{page\}\}|\{page\}|page/g, pageNum.toString());
+                replacedValue = replacedValue.replace(/\{\{pageSize\}\}|\{pageSize\}|pageSize/g, limit.toString());
+                replacedParams[key] = replacedValue;
             }
 
-            // Step 3: 构造请求 URL 并发起请求
+            // Step 3: 构造请求 URL
             const url = new URL(config.url);
             url.search = new URLSearchParams(replacedParams);
             const fetchOptions = {
@@ -121,9 +126,12 @@ const MusicAPI = {
                 headers: config.headers || {},
                 signal
             };
-            const res = await fetch(url.toString(), fetchOptions);
 
-            // Step 4: 处理返回数据
+            // Step 4: 加跨域代理（核心解决 CORS 报错）
+            const proxyUrl = this.getCorsProxyUrl(url.toString());
+            const res = await fetch(proxyUrl, fetchOptions);
+
+            // Step 5: 处理响应
             if (!res.ok) {
                 const srcMap = { 'netease': '网易', 'qq': 'QQ', 'kuwo': '酷我' };
                 const srcName = srcMap[source] || source;
@@ -132,7 +140,7 @@ const MusicAPI = {
             }
 
             const rawData = await res.json();
-            // 执行 transform 函数处理数据格式
+            // 执行数据转换
             let finalData = rawData;
             if (config.transform) {
                 try {
@@ -143,7 +151,7 @@ const MusicAPI = {
                 }
             }
 
-            // Step 5: 格式化数据（和旧代码返回格式保持一致）
+            // Step 6: 格式化数据（保持原有结构）
             const list = finalData.results || finalData.list || (Array.isArray(finalData) ? finalData : []);
             if (!Array.isArray(list)) return [];
 
@@ -190,11 +198,10 @@ const MusicAPI = {
         }
     },
 
-    // ========== 核心修改6：替换 aggregateSearch（聚合搜索） ==========
+    // ========== 聚合搜索（保持兼容） ==========
     async aggregateSearch(keyword, signal = null) {
         if (!keyword) return [];
         try {
-            // 聚合搜索：依次调用各平台搜索，合并结果
             const allResults = [];
             for (const source of this.sources) {
                 const results = await this.search(keyword, source, 1, 20, signal);
@@ -210,7 +217,7 @@ const MusicAPI = {
 
     urlCache: new Map(),
 
-    // ========== 核心修改7：替换 getSongDetails（适配新的 /v1/parse 接口） ==========
+    // ========== 歌曲详情/播放（适配新解析接口） ==========
     async getSongDetails(track) {
         try {
             const cacheKey = `${track.source}-${track.songId || track.id}`;
@@ -224,7 +231,6 @@ const MusicAPI = {
 
             let existingUrl = track.url || (track.originalData && track.originalData.url);
             if (existingUrl) {
-                // 原有逻辑保持不变
                 track.url = this.getProxyUrl(existingUrl, track.source);
                 const sid = track.songId || (track.id && String(track.id).split('-')[1] || track.id);
                 if (track.source === 'kuwo' && sid && !track.cover) {
@@ -234,7 +240,7 @@ const MusicAPI = {
                 }
                 track.lrc = track.lrc || track.originalData?.lrc || '';
             } else {
-                // 新逻辑：调用 /v1/parse 接口获取播放链接
+                // 适配新的 /v1/parse 解析接口
                 const qualities = this.getQualityChain(this.preferredQuality);
                 let detailData = null;
                 const sid = track.songId || (track.id && String(track.id).split('-')[1] || track.id);
@@ -245,7 +251,6 @@ const MusicAPI = {
                             // 过滤网易云不支持的 flac24bit
                             const realBr = track.source === 'netease' && br === 'flac24bit' ? 'flac' : br;
                             
-                            // 调用新的解析接口
                             const res = await fetch(`${this.endpoints.base}/v1/parse`, {
                                 method: 'POST',
                                 headers: this.getCommonHeaders(),
@@ -259,7 +264,6 @@ const MusicAPI = {
                             if (!res.ok) continue;
                             const result = await res.json();
                             
-                            // 成功获取播放链接
                             if (result.code === 0 && result.data && result.data[sid]) {
                                 detailData = result.data[sid];
                                 break;
@@ -270,23 +274,23 @@ const MusicAPI = {
                         }
                     }
 
-                    // 处理封面和歌词
                     if (detailData && sid) {
                         track.url = this.getProxyUrl(detailData.url || '', track.source);
                         track.cover = this.getProxyUrl(detailData.pic || track.cover || '', track.source);
                         track.lrc = detailData.lrc || track.lrc || '';
 
-                        // 单独获取歌词（如果需要）
+                        // 单独获取歌词
                         if (!track.lrc) {
                             const lrcConfig = await this.getMethodConfig(track.source, 'lrc');
                             if (lrcConfig) {
                                 const replacedParams = {};
                                 for (const [key, value] of Object.entries(lrcConfig.params || {})) {
-                                    replacedParams[key] = value.replace('{{id}}', sid);
+                                    replacedParams[key] = value.replace(/\{\{id\}\}|\{id\}|id/g, sid);
                                 }
                                 const url = new URL(lrcConfig.url);
                                 url.search = new URLSearchParams(replacedParams);
-                                const lrcRes = await fetch(url.toString(), {
+                                const proxyUrl = this.getCorsProxyUrl(url.toString());
+                                const lrcRes = await fetch(proxyUrl, {
                                     method: lrcConfig.method,
                                     headers: lrcConfig.headers || {}
                                 });
@@ -322,45 +326,52 @@ const MusicAPI = {
         return track;
     },
 
-    // 保持不变
+    // ========== 解析歌单URL（保持原有逻辑） ==========
     parsePlaylistUrl(url) {
         if (!url) return null;
         url = url.trim();
+
         if (url.includes('163.com')) {
             const match = url.match(/[?&]id=(\d+)/);
             if (match) return { source: 'netease', id: match[1] };
         }
+
         if (url.includes('qq.com') || url.includes('tencent')) {
             const match = url.match(/[?&]id=([\d\w]+)/);
             if (match) return { source: 'qq', id: match[1] };
         }
+
         if (url.includes('kuwo.cn')) {
             const match = url.match(/playlist_detail\/(\d+)/);
             if (match) return { source: 'kuwo', id: match[1] };
         }
+
         if (/^\d+$/.test(url)) {
             return { source: null, id: url };
         }
+
         return null;
     },
 
-    // ========== 核心修改8：替换 getPlaylistSongs（适配方法下发） ==========
+    // ========== 歌单歌曲（修复跨域+模板变量） ==========
     async getPlaylistSongs(source, playlistId) {
         try {
-            // Step 1: 获取歌单方法配置
             const config = await this.getMethodConfig(source, 'playlist');
             if (!config) return { name: '未知歌单', tracks: [] };
 
-            // Step 2: 替换 {{id}} 变量
+            // 修复模板变量替换
             const replacedParams = {};
             for (const [key, value] of Object.entries(config.params || {})) {
-                replacedParams[key] = value.replace('{{id}}', playlistId);
+                let replacedValue = value;
+                replacedValue = replacedValue.replace(/\{\{id\}\}|\{id\}|id/g, playlistId);
+                replacedParams[key] = replacedValue;
             }
 
-            // Step 3: 发起请求
+            // 构造请求 + 跨域代理
             const url = new URL(config.url);
             url.search = new URLSearchParams(replacedParams);
-            const res = await fetch(url.toString(), {
+            const proxyUrl = this.getCorsProxyUrl(url.toString());
+            const res = await fetch(proxyUrl, {
                 method: config.method,
                 headers: config.headers || {}
             });
@@ -368,7 +379,6 @@ const MusicAPI = {
             if (!res.ok) return { name: '未知歌单', tracks: [] };
             const rawData = await res.json();
             
-            // 执行数据转换
             let finalData = rawData;
             if (config.transform) {
                 try {
@@ -379,7 +389,6 @@ const MusicAPI = {
                 }
             }
 
-            // 格式化数据
             const list = finalData.list || finalData.results || (Array.isArray(finalData) ? finalData : []);
             if (!Array.isArray(list)) return { name: '未知歌单', tracks: [] };
 
@@ -414,17 +423,16 @@ const MusicAPI = {
         return { name: '未知歌单', tracks: [] };
     },
 
-    // ========== 核心修改9：替换 getBillboardList（适配方法下发） ==========
+    // ========== 榜单列表（修复跨域） ==========
     async getBillboardList(source) {
         try {
-            // 获取排行榜列表配置
             const config = await this.getMethodConfig(source, 'toplists');
             if (!config) return [];
 
-            // 发起请求
             const url = new URL(config.url);
             url.search = new URLSearchParams(config.params || {});
-            const res = await fetch(url.toString(), {
+            const proxyUrl = this.getCorsProxyUrl(url.toString());
+            const res = await fetch(proxyUrl, {
                 method: config.method,
                 headers: config.headers || {}
             });
@@ -432,7 +440,6 @@ const MusicAPI = {
             if (!res.ok) return [];
             const rawData = await res.json();
             
-            // 数据转换
             let finalData = rawData;
             if (config.transform) {
                 try {
@@ -443,7 +450,6 @@ const MusicAPI = {
                 }
             }
 
-            // 格式化数据
             const list = finalData.list || finalData.results || (Array.isArray(finalData) ? finalData : []);
             return list.map(item => {
                 let picUrl = item.pic || item.cover || item.image || '';
@@ -463,23 +469,24 @@ const MusicAPI = {
         return [];
     },
 
-    // ========== 核心修改10：替换 getBillboardDetail（适配方法下发） ==========
+    // ========== 榜单详情（修复跨域+模板变量） ==========
     async getBillboardDetail(source, id) {
         try {
-            // 获取排行榜详情配置
             const config = await this.getMethodConfig(source, 'toplist');
             if (!config) return [];
 
-            // 替换 {{id}} 变量
+            // 修复模板变量
             const replacedParams = {};
             for (const [key, value] of Object.entries(config.params || {})) {
-                replacedParams[key] = value.replace('{{id}}', id);
+                let replacedValue = value;
+                replacedValue = replacedValue.replace(/\{\{id\}\}|\{id\}|id/g, id);
+                replacedParams[key] = replacedValue;
             }
 
-            // 发起请求
             const url = new URL(config.url);
             url.search = new URLSearchParams(replacedParams);
-            const res = await fetch(url.toString(), {
+            const proxyUrl = this.getCorsProxyUrl(url.toString());
+            const res = await fetch(proxyUrl, {
                 method: config.method,
                 headers: config.headers || {}
             });
@@ -487,7 +494,6 @@ const MusicAPI = {
             if (!res.ok) return [];
             const rawData = await res.json();
             
-            // 数据转换
             let finalData = rawData;
             if (config.transform) {
                 try {
@@ -498,7 +504,6 @@ const MusicAPI = {
                 }
             }
 
-            // 格式化数据
             const list = finalData.list || finalData.results || finalData.songs || (Array.isArray(finalData) ? finalData : []);
             if (!Array.isArray(list)) return [];
 
@@ -530,7 +535,7 @@ const MusicAPI = {
         return [];
     },
 
-    // 保持不变
+    // ========== 歌词加载（保持原有逻辑） ==========
     async fetchLrcText(lrcUrl) {
         if (!lrcUrl || !lrcUrl.startsWith('http')) return lrcUrl;
         const proxies = [
@@ -554,7 +559,7 @@ const MusicAPI = {
         return lrcUrl;
     },
 
-    // 兼容方法保持不变
+    // ========== 兼容方法（保持原有逻辑） ==========
     async searchNetease(keyword, page, limit) { return this.search(keyword, 'netease', page, limit); },
     async searchCommon(keyword, source, page, limit) { return this.search(keyword, source, page, limit); }
 };
