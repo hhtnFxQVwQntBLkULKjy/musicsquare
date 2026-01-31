@@ -17,11 +17,16 @@ const MusicAPI = {
             'X-API-Key': this.apiKey,
             'Content-Type': 'application/json'
         };
-        const res = await fetch(`${this.endpoints.base}${path}`, { ...options, headers });
-        return res.json();
+        try {
+            const res = await fetch(`${this.endpoints.base}${path}`, { ...options, headers });
+            if (!res.ok) return { code: res.status, data: [] };
+            return await res.json();
+        } catch (e) {
+            return { code: -1, data: [] };
+        }
     },
 
-    // 核心搜索
+    // 1. 搜索功能
     async search(keyword, source, page = 1, limit = 20, signal = null) {
         if (!keyword) return [];
         const cacheKey = `${source}:${keyword}:${page}:${limit}`;
@@ -29,7 +34,7 @@ const MusicAPI = {
 
         try {
             const methodRes = await this.fetchTuneHub(`/v1/methods/${source}/search`);
-            if (methodRes.code !== 0) return [];
+            if (methodRes.code !== 0 || !methodRes.data) return [];
             const config = methodRes.data;
 
             const queryParams = new URLSearchParams();
@@ -53,6 +58,7 @@ const MusicAPI = {
             }
 
             const targetUrl = `${config.url}${config.url.includes('?') ? '&' : '?'}${queryParams.toString()}`;
+            // 使用更稳定的代理服务
             const finalUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
 
             const res = await fetch(finalUrl, { method: config.method, headers: config.headers, signal });
@@ -62,7 +68,6 @@ const MusicAPI = {
             this.searchCache.set(cacheKey, results);
             return results;
         } catch (e) {
-            console.error(`${source} 搜索失败:`, e);
             return [];
         }
     },
@@ -73,40 +78,46 @@ const MusicAPI = {
         return all.flat();
     },
 
-    // 重点修复：热门歌曲（排行榜）
+    // 2. 重点修复：热门歌曲（排行榜）
     async getBillboardList(source) {
         try {
             const res = await this.fetchTuneHub(`/v1/methods/${source}/toplists`);
-            // 确保返回的是数组，适配 ui.js 的 forEach 调用
-            if (res.code === 0 && Array.isArray(res.data)) {
-                return res.data.map(item => ({
-                    id: item.id || item.topId,
-                    name: item.name || item.title,
-                    pic: item.pic || item.cover,
-                    description: item.intro || ''
-                }));
+            // 针对新版 API 结构进行多层级尝试，确保提取出数组
+            let rawData = [];
+            if (res.code === 0) {
+                // 尝试提取数组：res.data 或 res.data.list 或 res.data.results
+                rawData = res.data?.list || res.data?.results || (Array.isArray(res.data) ? res.data : []);
             }
-            return []; 
+
+            // 强制确保返回的是数组格式，即使出错也要返回 []
+            if (!Array.isArray(rawData)) rawData = [];
+
+            return rawData.map(item => ({
+                id: item.id || item.topId || item.uid,
+                name: item.name || item.title || '未知榜单',
+                pic: item.pic || item.cover || item.image || '',
+                description: item.intro || item.updateFrequency || ''
+            }));
         } catch (e) {
             console.error("加载排行榜失败:", e);
-            return [];
+            return []; // 兜底返回空数组，防止 ui.js 报错
         }
     },
 
-    // 解析播放地址
+    // 3. 解析播放地址
     async getSongDetails(track) {
-        const sid = track.songId || track.id.split('-')[1];
+        const sid = track.songId || (track.id && track.id.includes('-') ? track.id.split('-')[1] : track.id);
         try {
             const res = await this.fetchTuneHub('/v1/parse', {
                 method: 'POST',
                 body: JSON.stringify({
                     platform: track.source,
-                    ids: sid,
+                    ids: String(sid),
                     quality: this.preferredQuality
                 })
             });
 
-            if (res.code === 0 && res.data?.[0]) {
+            if (res.code === 0 && res.data && Array.isArray(res.data) && res.data[0]) {
                 const item = res.data[0];
                 track.url = item.url;
                 track.cover = item.pic || track.cover;
@@ -136,16 +147,16 @@ const MusicAPI = {
                 id: `${source}-${sid}`,
                 songId: sid,
                 title: item.name || item.title || item.songname || '未知',
-                artist: item.artist || item.author || (item.singer?.[0]?.name) || '未知歌手',
+                artist: item.artist || item.author || (item.singer && item.singer[0] ? item.singer[0].name : '未知歌手'),
                 album: item.album || item.albumname || '-',
                 cover: item.pic || item.cover || '',
                 source: source,
                 duration: item.interval || item.duration || 0
             };
-        }).filter(s => s.songId !== 'undefined');
+        }).filter(s => s.songId && s.songId !== 'undefined');
     },
 
-    // 占位兼容
+    // 保持旧逻辑接口不崩
     getProxyUrl(url) { return url; },
     async getPlaylistSongs(source, id) { return { name: '歌单', tracks: [] }; },
     async searchNetease(k, p, l) { return this.search(k, 'netease', p, l); },
