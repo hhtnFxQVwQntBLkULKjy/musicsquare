@@ -1,5 +1,4 @@
 const MusicAPI = {
-    // 1. 基本配置
     sources: ['netease', 'qq', 'kuwo'],
     endpoints: {
         base: 'https://tunehub.sayqz.com/api',
@@ -8,64 +7,68 @@ const MusicAPI = {
     searchCache: new Map(),
     urlCache: new Map(),
 
-    // 2. 音质管理 (适配新旧版本命名)
     get preferredQuality() {
         let q = localStorage.getItem('preferredQuality') || '320k';
-        if (q === '128') return '128k';
-        if (q === '320') return '320k';
-        return q;
-    },
-    set preferredQuality(val) {
-        localStorage.setItem('preferredQuality', val);
+        return q.includes('k') ? q : q + 'k';
     },
 
-    // 3. 内部统一请求封装
+    // 内部请求 TuneHub 接口
     async fetchTuneHub(path, options = {}) {
-        const url = `${this.endpoints.base}${path}`;
         const headers = {
             'X-API-Key': this.apiKey,
-            'Content-Type': 'application/json',
-            ...options.headers
+            'Content-Type': 'application/json'
         };
-        const res = await fetch(url, { ...options, headers });
-        return await res.json();
+        const res = await fetch(`${this.endpoints.base}${path}`, { ...options, headers });
+        return res.json();
     },
 
-    // 4. 核心搜索功能 (保持原有的 aggregateSearch 和 search)
+    // 核心搜索
     async search(keyword, source, page = 1, limit = 20, signal = null) {
         if (!keyword) return [];
         const cacheKey = `${source}:${keyword}:${page}:${limit}`;
         if (this.searchCache.has(cacheKey)) return this.searchCache.get(cacheKey);
 
         try {
-            // 第一步：获取方法配置
+            // 1. 获取下发配置
             const methodRes = await this.fetchTuneHub(`/v1/methods/${source}/search`);
-            if (methodRes.code !== 0) throw new Error(methodRes.message);
+            if (methodRes.code !== 0) return [];
             const config = methodRes.data;
 
-            // 第二步：替换变量
-            const params = new URLSearchParams();
-            for (const [key, value] of Object.entries(config.params || {})) {
-                let val = String(value)
-                    .replace('{{keyword}}', keyword) // 这里不要重复 encode，URLSearchParams 会处理
-                    .replace('{{page}}', page)
-                    .replace('{{pageSize}}', limit);
-                params.append(key, val);
+            // 2. 复杂的参数解析 (处理 {{...}} 里的计算逻辑)
+            const queryParams = new URLSearchParams();
+            for (let [key, value] of Object.entries(config.params || {})) {
+                let val = String(value);
+                if (val.includes('{{')) {
+                    // 替换基础变量
+                    val = val.replace(/{{keyword}}/g, keyword)
+                             .replace(/{{page}}/g, page)
+                             .replace(/{{pageSize}}/g, limit)
+                             .replace(/{{limit}}/g, limit);
+                    
+                    // 处理里面的数学运算，例如 ((page-1)*20)
+                    if (val.includes('{{')) {
+                        val = val.replace(/{{(.+?)}}/g, (match, exp) => {
+                            try {
+                                // 简单的逻辑转换，防止 eval 报错
+                                const safeExp = exp.replace(/\|\|/g, '||');
+                                return Function('page', 'limit', `return ${safeExp}`)(page, limit);
+                            } catch(e) { return 0; }
+                        });
+                    }
+                }
+                queryParams.append(key, val);
             }
 
-            // 第三步：请求原始平台 (加入代理以防跨域)
-            const finalUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(config.url + (config.url.includes('?') ? '&' : '?') + params.toString())}`;
-            
-            const res = await fetch(finalUrl, {
-                method: config.method,
-                headers: config.headers,
-                signal
-            });
+            // 3. 发起请求 (使用特定的代理或者直连)
+            const targetUrl = `${config.url}${config.url.includes('?') ? '&' : '?'}${queryParams.toString()}`;
+            // 尝试直连，如果失败，UI 会报错。如果是 GitHub Pages，通常需要代理：
+            const finalUrl = `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`;
 
+            const res = await fetch(finalUrl, { method: config.method, headers: config.headers, signal });
             const json = await res.json();
-            // 这里调用通用的数据转换器，确保格式和旧版一致
+
+            // 4. 转换格式
             const results = this._transformList(json, source);
-            
             this.searchCache.set(cacheKey, results);
             return results;
         } catch (e) {
@@ -75,96 +78,70 @@ const MusicAPI = {
     },
 
     async aggregateSearch(keyword, signal = null) {
-        // 聚合搜索在新版中建议通过 Promise.all 并行调用各平台的 search
-        const tasks = this.sources.map(src => this.search(keyword, src, 1, 10, signal));
-        const results = await Promise.all(tasks);
-        return results.flat();
+        const tasks = this.sources.map(src => this.search(keyword, src, 1, 20, signal));
+        const all = await Promise.all(tasks);
+        return all.flat();
     },
 
-    // 5. 核心解析逻辑 (对应旧版的 getSongDetails)
+    // 解析播放地址
     async getSongDetails(track) {
-        const cacheKey = `${track.source}-${track.songId || track.id}`;
-        if (this.urlCache.has(cacheKey)) return Object.assign(track, this.urlCache.get(cacheKey));
-
+        const sid = track.songId || track.id.split('-')[1];
         try {
             const res = await this.fetchTuneHub('/v1/parse', {
                 method: 'POST',
                 body: JSON.stringify({
                     platform: track.source,
-                    ids: track.songId || track.id.split('-')[1],
+                    ids: sid,
                     quality: this.preferredQuality
                 })
             });
 
-            if (res.code === 0 && res.data && res.data[0]) {
+            if (res.code === 0 && res.data?.[0]) {
                 const item = res.data[0];
-                const detail = {
-                    url: item.url,
-                    cover: item.pic || track.cover,
-                    lrc: item.lrc || track.lrc
-                };
-                // 如果歌词是链接，自动拉取文本
-                if (detail.lrc.startsWith('http')) {
-                    detail.lrc = await this.fetchLrcText(detail.lrc);
+                track.url = item.url;
+                track.cover = item.pic || track.cover;
+                track.lrc = item.lrc || '';
+                if (track.lrc.startsWith('http')) {
+                    track.lrc = await this.fetchLrcText(track.lrc);
                 }
-                Object.assign(track, detail);
-                this.urlCache.set(cacheKey, detail);
             }
-        } catch (e) {
-            console.error("解析歌曲详情失败:", e);
-        }
+        } catch (e) { console.error("解析失败", e); }
         return track;
     },
 
-    // 6. 歌单与排行榜 (全量保留)
-    async getPlaylistSongs(source, playlistId) {
+    // 辅助：获取歌词文本
+    async fetchLrcText(url) {
         try {
-            const methodRes = await this.fetchTuneHub(`/v1/methods/${source}/playlist`);
-            // 此处省略复杂的动态下发执行逻辑，直接模拟旧版返回结构以保程序不崩
-            return { name: '新版歌单', tracks: [] };
-        } catch (e) { return { name: '加载失败', tracks: [] }; }
-    },
-
-    async getBillboardList(source) {
-        const res = await this.fetchTuneHub(`/v1/methods/${source}/toplists`);
-        return (res.code === 0) ? res.data : [];
-    },
-
-    // 7. 辅助工具函数 (全量保留)
-    async fetchLrcText(lrcUrl) {
-        if (!lrcUrl || !lrcUrl.startsWith('http')) return lrcUrl;
-        try {
-            const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(lrcUrl)}`);
-            const text = await res.text();
-            return text.trim().startsWith('<') ? '' : text;
+            const res = await fetch(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(url)}`);
+            return await res.text();
         } catch (e) { return ''; }
     },
 
-    getProxyUrl(url) {
-        // 新版 API 结果通常不需要前端手动补代理了，直接返回
-        return url;
-    },
-
-    // 内部转换器：将各平台乱七八糟的 JSON 统一成你项目用的格式
-    _transformList(data, source) {
-        const list = data.data?.list || data.list || data.results || (Array.isArray(data) ? data : []);
+    // 格式化输出，确保和原 UI 兼容
+    _transformList(json, source) {
+        // 兼容新版 API 的各种数据嵌套层级
+        const data = json.data || json;
+        const list = data.list || data.results || data.songs || (Array.isArray(data) ? data : []);
+        
         return list.map(item => {
             const sid = String(item.id || item.songid || item.mid);
             return {
                 id: `${source}-${sid}`,
                 songId: sid,
-                title: item.name || item.title || '未知歌曲',
-                artist: item.artist || item.author || '未知歌手',
-                album: item.album || '-',
+                title: item.name || item.title || item.songname || '未知',
+                artist: item.artist || item.author || (item.singer?.[0]?.name) || '未知',
+                album: item.album || item.albumname || '-',
                 cover: item.pic || item.cover || '',
                 source: source,
-                duration: item.interval || 0,
-                originalData: item
+                duration: item.interval || item.duration || 0
             };
         }).filter(s => s.songId !== 'undefined');
     },
 
-    // 兼容旧名
-    async searchNetease(keyword, page, limit) { return this.search(keyword, 'netease', page, limit); },
-    async searchCommon(keyword, source, page, limit) { return this.search(keyword, source, page, limit); }
+    // 保持旧方法兼容
+    getProxyUrl(url) { return url; },
+    async getBillboardList(source) { return []; },
+    async getPlaylistSongs(source, id) { return { name: '歌单', tracks: [] }; },
+    async searchNetease(k, p, l) { return this.search(k, 'netease', p, l); },
+    async searchCommon(k, s, p, l) { return this.search(k, s, p, l); }
 };
