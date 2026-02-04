@@ -544,10 +544,17 @@ class MusicPlayer {
             this.source = this.audioCtx.createMediaElementSource(this.audio);
             this.lowFilter = this.audioCtx.createBiquadFilter();
             this.lowFilter.type = 'lowshelf';
-            this.lowFilter.frequency.value = 200;
+            this.lowFilter.frequency.value = 100; // Lower frequency for deeper bass
+
+            this.midFilter = this.audioCtx.createBiquadFilter();
+            this.midFilter.type = 'peaking';
+            this.midFilter.frequency.value = 1000;
+            this.midFilter.Q.value = 1;
+
             this.highFilter = this.audioCtx.createBiquadFilter();
             this.highFilter.type = 'highshelf';
-            this.highFilter.frequency.value = 3000;
+            this.highFilter.frequency.value = 10000; // Higher frequency for "air"
+
             this.convolver = this.audioCtx.createConvolver();
             this.convolver.buffer = this.createImpulseResponse(1.5, 1.5);
             this.reverbGain = this.audioCtx.createGain();
@@ -604,22 +611,39 @@ class MusicPlayer {
                 this.source.connect(this.masterGain);
                 return;
             }
+            // Chain: Source -> Low -> Mid -> High -> Master
             this.source.connect(this.lowFilter);
-            this.lowFilter.connect(this.highFilter);
+            this.lowFilter.connect(this.midFilter);
+            this.midFilter.connect(this.highFilter);
             let lastNode = this.highFilter;
+
             if (mode === 'headphone') {
-                this.lowFilter.gain.value = 3;
-                this.highFilter.gain.value = 3;
+                // "V-Shape" Tuning: Deep Bass + Clear Treble + Reduced Mids
+                this.lowFilter.frequency.value = 80;
+                this.lowFilter.gain.value = 5;
+
+                this.midFilter.frequency.value = 800;
+                this.midFilter.gain.value = -3; // Scoop out mud
+
+                this.highFilter.frequency.value = 12000;
+                this.highFilter.gain.value = 5;
+
                 lastNode.connect(this.masterGain);
             } else if (mode === 'speaker') {
-                // Optimized values to prevent clipping noise
-                this.lowFilter.gain.value = 4; // Reduced from 6
-                this.highFilter.gain.value = 4; // Reduced from 6
+                // Balanced Boost for Speakers
+                this.lowFilter.frequency.value = 200;
+                this.lowFilter.gain.value = 4;
+
+                this.midFilter.gain.value = 0; // Flat mids
+
+                this.highFilter.frequency.value = 8000;
+                this.highFilter.gain.value = 4;
+
                 lastNode.connect(this.masterGain);
                 lastNode.connect(this.convolver);
                 this.convolver.connect(this.reverbGain);
                 this.reverbGain.connect(this.masterGain);
-                this.reverbGain.gain.value = 0.25; // Reduced reverb from 0.4
+                this.reverbGain.gain.value = 0.25;
             }
             // MasterGain is already connected to compressor -> destination
         } catch (err) {
