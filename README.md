@@ -101,6 +101,15 @@ README 中的默认 API 代理地址仅供演示，**严禁滥用**。若发现�
 2. 填写一个在你 Cloudflare 账号下的二级域名（例如 `api.yourdomain.com`）。
 3. Cloudflare 会自动为你创建所需的 DNS 解析。
 
+#### 第四步：配置 TuneHub API Key
+1. 访问 [TuneHub API](https://tunehub.sayqz.com/) 获取你的 API Key。
+2. 在 Worker 的 `Settings` -> `Variables` -> `Environment Variables` 中添加：
+   - **Variable name**: `TUNEHUB_API_KEY`
+   - **Value**: 你的 TuneHub API Key
+
+> [!IMPORTANT]
+> TuneHub API Key 必须配置在后端环境变量中，不能暴露在前端代码中。
+
 ### 2. 前端部署 (GitHub Pages)
 
 1. **Fork 本项目** 到个人账号。

@@ -1,10 +1,11 @@
 const MusicAPI = {
     // Configuration
-    sources: ['netease', 'qq', 'kuwo'], // migu removed from active sources
+    sources: ['netease', 'qq', 'kuwo'],
 
-    // API Endpoints
+    // API Endpoints - 使用你的 Worker 域名
     endpoints: {
-        base: 'https://music-dl.sayqz.com/api/',
+        worker: '', // 将在初始化时设置为 API_BASE
+        netease: 'https://netease-cloud-music-api-eight-rho.vercel.app',
     },
 
     searchCache: new Map(),
@@ -26,9 +27,14 @@ const MusicAPI = {
         return allQualities.slice(idx); // from preferred onwards
     },
 
+    // 初始化 Worker 端点
+    init(apiBase) {
+        this.endpoints.worker = apiBase;
+    },
+
     getProxyUrl(url, source = null) {
         if (!url) return url;
-        const PROXY_BASE = `${API_BASE}/proxy?url=`;
+        const PROXY_BASE = `${this.endpoints.worker}/proxy?url=`;
 
         // Force HTTPS for NetEase and QQ (they have valid certs)
         if (url.startsWith('http://') && (url.includes('music.126.net') || url.includes('qq.com'))) {
@@ -53,6 +59,7 @@ const MusicAPI = {
         const needProxyByDomain = url.includes('126.net') ||
             url.includes('qq.com') ||
             url.includes('kuwo.cn') ||
+            url.includes('kwcdn.kuwo.cn') ||
             url.includes('sycdn.kuwo.cn');
 
         // Check if it's an API URL for kuwo source
@@ -64,6 +71,7 @@ const MusicAPI = {
         return url;
     },
 
+    // 搜索 - 根据平台使用不同的 API
     async search(keyword, source, page = 1, limit = 20, signal = null) {
         if (!keyword) return [];
 
@@ -73,63 +81,17 @@ const MusicAPI = {
         }
 
         try {
-            const url = `${this.endpoints.base}?source=${source}&type=search&keyword=${encodeURIComponent(keyword)}&page=${page}&limit=${limit}`;
-            const fetchOptions = signal ? { signal } : {};
-            const res = await fetch(url, fetchOptions);
+            let results = [];
 
-            // Handle network errors
-            if (!res.ok) {
-                const srcMap = { 'netease': '网易', 'qq': 'QQ', 'kuwo': '酷我' };
-                const srcName = srcMap[source] || source;
-                console.error(`搜索 "${keyword}" 失败:`, `HTTP ${res.status}`);
-                if (window.UI && typeof window.UI.showToast === 'function') {
-                    UI.showToast(`${srcName}音乐搜索失败，请稍后重试`, 'error');
-                }
-                return [];
+            if (source === 'netease') {
+                results = await this._searchNetease(keyword, page, limit, signal);
+            } else if (source === 'qq') {
+                results = await this._searchQQ(keyword, page, limit, signal);
+            } else if (source === 'kuwo') {
+                results = await this._searchKuwo(keyword, page, limit, signal);
             }
 
-            const json = await res.json();
-
-            if (json.message && json.message.includes('重试次数过多')) {
-                const srcMap = { 'netease': '网易', 'qq': 'QQ', 'kuwo': '酷我' };
-                const srcName = srcMap[source] || source;
-                UI.showToast(`${srcName}音乐: 搜索过于频繁，请稍后再试`, 'warning');
-                return [];
-            }
-
-            if (json.code !== 200 || !json.data) return [];
-
-            const list = json.data.results || json.data.list || (Array.isArray(json.data) ? json.data : []);
-            if (!Array.isArray(list)) return [];
-
-            const results = list.map(item => {
-                const sid = String(item.id || item.songid || item.mid || '');
-                const src = item.platform || item.source || source;
-                let coverUrl = item.pic || item.cover || item.image || '';
-                // Prefer raw URL + getProxyUrl over the redirector to avoid nested SSL issues
-                if (coverUrl) {
-                    coverUrl = this.getProxyUrl(coverUrl, src);
-                } else if (src === 'kuwo' && sid) {
-                    // Fallback to redirector only if no raw URL is available
-                    coverUrl = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, src);
-                }
-                return {
-                    id: `${src}-${sid}`,
-                    songId: sid,
-                    title: item.name || item.title || '未知歌曲',
-                    artist: item.artist || item.author || '未知歌手',
-                    album: item.album || item.albumname || '-',
-                    cover: coverUrl,
-                    source: src,
-                    duration: item.interval || item.duration || 0,
-                    quality: item.quality,
-                    types: item.types || [],
-                    url: item.url || '',  // Preserve URL from API
-                    lrc: item.lrc || '',  // Preserve lyrics from API
-                    originalData: item
-                };
-            }).filter(s => s.songId);
-
+            // Cache results
             if (this.searchCache.size > 100) {
                 const firstKey = this.searchCache.keys().next().value;
                 this.searchCache.delete(firstKey);
@@ -138,63 +100,238 @@ const MusicAPI = {
 
             return results;
         } catch (e) {
-            // Silently ignore aborted requests (user switched sources)
-            if (e.name === 'AbortError') {
-                return [];
-            }
-            const srcMap = { 'netease': '网易', 'qq': 'QQ', 'kuwo': '酷我' };
-            const srcName = srcMap[source] || source;
+            if (e.name === 'AbortError') return [];
             console.error(`搜索 "${keyword}" 失败:`, e.message);
-            if (window.UI && typeof window.UI.showToast === 'function') {
-                UI.showToast(`${srcName}音乐搜索失败: ${e.message}`, 'error');
-            }
             return [];
         }
     },
 
+    // 网易云搜索 - 使用 Vercel 公共实例
+    async _searchNetease(keyword, page, limit, signal) {
+        const offset = (page - 1) * limit;
+        const url = `${this.endpoints.netease}/search?keywords=${encodeURIComponent(keyword)}&offset=${offset}&limit=${limit}`;
+        const fetchOptions = signal ? { signal } : {};
+        const res = await fetch(url, fetchOptions);
+        const json = await res.json();
+
+        if (json.code !== 200 || !json.result || !json.result.songs) return [];
+
+        return json.result.songs.map(item => {
+            const sid = String(item.id);
+            return {
+                id: `netease-${sid}`,
+                songId: sid,
+                title: item.name || '未知歌曲',
+                artist: item.artists ? item.artists.map(a => a.name).join(', ') : '未知歌手',
+                album: item.album ? item.album.name : '-',
+                cover: item.album && item.album.picUrl ? item.album.picUrl : '',
+                source: 'netease',
+                duration: item.duration ? Math.floor(item.duration / 1000) : 0
+            };
+        });
+    },
+
+    // QQ音乐搜索 - 使用 Worker 通用代理
+    // JSONP Helper
+    jsonp(url, params = {}) {
+        return new Promise((resolve, reject) => {
+            const callbackName = `jsonp_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+            const script = document.createElement('script');
+
+            let queryString = '';
+            for (const key in params) {
+                queryString += `&${key}=${encodeURIComponent(params[key])}`;
+            }
+
+            // QQ Music specific callback parameter names
+            const targetUrl = `${url}&jsonpCallback=${callbackName}&callback=${callbackName}${queryString}`;
+
+            window[callbackName] = (data) => {
+                delete window[callbackName];
+                document.body.removeChild(script);
+                resolve(data);
+            };
+
+            script.onerror = () => {
+                delete window[callbackName];
+                document.body.removeChild(script);
+                reject(new Error('JSONP request failed'));
+            };
+
+            script.src = targetUrl;
+            document.body.appendChild(script);
+        });
+    },
+
+    // QQ音乐搜索 - 使用 search_for_qq_cp API (GET请求，直接返回歌曲列表)
+    async _searchQQ(keyword, page, limit, signal) {
+        // 使用 search_for_qq_cp 接口
+        const targetUrl = `https://shc.y.qq.com/soso/fcgi-bin/search_for_qq_cp?w=${encodeURIComponent(keyword)}&p=${page}&n=${limit}&format=json`;
+
+        const url = `${this.endpoints.worker}/tunehub/request`;
+        const fetchOptions = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: targetUrl,
+                method: 'GET',
+                headers: {
+                    'Referer': 'https://y.qq.com/',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            })
+        };
+        if (signal) fetchOptions.signal = signal;
+
+        try {
+            console.log('[QQ] Requesting via search_for_qq_cp:', keyword);
+            const res = await fetch(url, fetchOptions);
+            const result = await res.json();
+
+            // Check worker success
+            if (!result.success || !result.data) return [];
+
+            let data = result.data;
+            if (typeof data === 'string') {
+                try { data = JSON.parse(data); } catch (e) { }
+            }
+
+            // search_for_qq_cp returns data.song.list
+            const songList = data?.data?.song?.list;
+            if (!songList || !Array.isArray(songList)) return [];
+
+            return songList.map(item => {
+                const sid = item.songmid;
+                const albumId = item.albummid || '';
+                return {
+                    id: `qq-${sid}`,
+                    songId: sid,
+                    title: item.songname || '未知歌曲',
+                    artist: item.singer ? item.singer.map(s => s.name).join(', ') : '未知歌手',
+                    album: item.albumname || '-',
+                    cover: albumId ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albumId}.jpg` : '',
+                    source: 'qq',
+                    duration: item.interval || 0
+                };
+            });
+        } catch (e) {
+            console.error('QQ Search error:', e);
+            return [];
+        }
+    },
+
+    // 酷我搜索 - 通过 Worker 代理 (使用 searchMusicBykeyWord + strategy=2012 获取正版歌曲)
+    async _searchKuwo(keyword, page, limit, signal) {
+        const pn = page - 1;
+        // 使用新接口，strategy=2012 确保返回正版歌曲而不是翻唱版本
+        const targetUrl = `http://www.kuwo.cn/search/searchMusicBykeyWord?vipver=1&client=kt&ft=music&cluster=0&strategy=2012&encoding=utf8&rformat=json&mobi=1&issubtitle=1&show_copyright_off=1&pn=${pn}&rn=${limit}&all=${encodeURIComponent(keyword)}`;
+
+        const url = `${this.endpoints.worker}/tunehub/request`;
+        const fetchOptions = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: targetUrl,
+                method: 'GET',
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            })
+        };
+        if (signal) fetchOptions.signal = signal;
+
+        try {
+            console.log('[Kuwo] Requesting:', targetUrl);
+            const res = await fetch(url, fetchOptions);
+            const result = await res.json();
+            console.log('[Kuwo] Worker Result:', result);
+
+            let rawData = result.data;
+            let abslist = [];
+
+            if (typeof rawData === 'string') {
+                if (rawData.startsWith('jsondata=')) {
+                    rawData = rawData.replace('jsondata=', '');
+                }
+                try {
+                    const parseObj = new Function('return ' + rawData);
+                    const dataObj = parseObj();
+                    abslist = dataObj.abslist || [];
+                } catch (e) {
+                    console.error('Kuwo parse error:', e);
+                }
+            } else if (rawData && rawData.abslist) {
+                abslist = rawData.abslist;
+            }
+
+            return abslist.map(item => ({
+                id: `kuwo-${item.MUSICRID.replace('MUSIC_', '')}`,
+                songId: item.MUSICRID.replace('MUSIC_', ''),
+                title: item.SONGNAME || '未知歌曲',
+                artist: item.ARTIST ? item.ARTIST.replace(/&/g, ', ') : '未知歌手',
+                album: item.ALBUM || '-',
+                cover: item.web_albumpic_short ? this.getProxyUrl(`https://img1.kuwo.cn/star/albumcover/${item.web_albumpic_short}`, 'kuwo') : '',
+                source: 'kuwo',
+                duration: parseInt(item.DURATION) || 0
+            }));
+
+        } catch (e) {
+            console.error('Kuwo search error:', e);
+            return [];
+        }
+    },
+
+    // Timeout helper
+    timeoutPromise(promise, ms) {
+        return new Promise((resolve, reject) => {
+            const timeoutId = setTimeout(() => {
+                reject(new Error(`Operation timed out after ${ms}ms`));
+            }, ms);
+            promise.then(
+                (res) => {
+                    clearTimeout(timeoutId);
+                    resolve(res);
+                },
+                (err) => {
+                    clearTimeout(timeoutId);
+                    reject(err);
+                }
+            );
+        });
+    },
+
     async aggregateSearch(keyword, signal = null) {
         if (!keyword) return [];
+
+        const TIMEOUT = 15000; // 15s timeout per platform
+
+        const searchPromises = [
+            this.timeoutPromise(this.search(keyword, 'netease', 1, 10, signal), TIMEOUT),
+            this.timeoutPromise(this.search(keyword, 'qq', 1, 10, signal), TIMEOUT),
+            this.timeoutPromise(this.search(keyword, 'kuwo', 1, 10, signal), TIMEOUT)
+        ];
+
         try {
-            const url = `${this.endpoints.base}?type=aggregateSearch&keyword=${encodeURIComponent(keyword)}`;
-            const fetchOptions = signal ? { signal } : {};
-            const res = await fetch(url, fetchOptions);
-            const json = await res.json();
+            // Use allSettled to ensure we get results even if some fail
+            const resultsSettled = await Promise.allSettled(searchPromises);
 
-            const list = json.data.results || json.data.list || (Array.isArray(json.data) ? json.data : []);
-            if (!Array.isArray(list)) return [];
-
-            return list.map(item => {
-                const sid = String(item.id || item.songid || item.mid || '');
-                const src = item.platform || item.source || 'netease';
-                let coverUrl = item.pic || item.cover || '';
-                // Prefer raw URL + getProxyUrl
-                if (coverUrl) {
-                    coverUrl = this.getProxyUrl(coverUrl, src);
-                } else if (src === 'kuwo' && sid) {
-                    coverUrl = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, src);
-                }
-                return {
-                    id: `${src}-${sid}`,
-                    songId: sid,
-                    title: item.name || item.title || '未知歌曲',
-                    artist: item.artist || item.author || '未知歌手',
-                    album: item.album || '-',
-                    cover: coverUrl,
-                    source: src,
-                    duration: item.interval || item.duration || 0,
-                    quality: item.quality,
-                    types: item.types || [],
-                    url: item.url || '',
-                    lrc: item.lrc || '',
-                    originalData: item
-                };
-            }).filter(s => s.songId);
-        } catch (e) {
-            // Silently ignore aborted requests (user switched sources)
-            if (e.name === 'AbortError') {
+            const results = resultsSettled.map(r => {
+                if (r.status === 'fulfilled') return r.value;
+                // Log warning but don't fail
+                console.warn('Search platform failed or timed out:', r.reason);
                 return [];
+            });
+
+            // 交替合并结果
+            const merged = [];
+            const maxLen = Math.max(...results.map(r => r.length));
+            for (let i = 0; i < maxLen; i++) {
+                for (const arr of results) {
+                    if (arr[i]) merged.push(arr[i]);
+                }
             }
-            console.error(`Aggregate search error:`, e);
+            return merged;
+        } catch (e) {
+            if (e.name === 'AbortError') return [];
+            console.error('Aggregate search critical error:', e);
             return [];
         }
     },
@@ -202,6 +339,7 @@ const MusicAPI = {
     // URL cache to avoid repeated API requests
     urlCache: new Map(),
 
+    // 获取歌曲详情 - 使用 TuneHub 解析
     async getSongDetails(track) {
         try {
             // Check cache first
@@ -214,93 +352,75 @@ const MusicAPI = {
                 return track;
             }
 
-            // Check if we already have a URL from the API response (originalData or direct)
-            let existingUrl = track.url || (track.originalData && track.originalData.url);
+            const sid = track.songId || (track.id && String(track.id).includes('-') ? String(track.id).split('-')[1] : track.id);
+            if (!sid) return track;
 
-            // If we have an existing URL, use it directly (no need to try higher qualities)
-            if (existingUrl) {
-                track.url = this.getProxyUrl(existingUrl, track.source);
-                let rawCover = track.cover || (track.originalData && track.originalData.pic) || '';
+            // 平台映射
+            const platformMap = { netease: 'netease', qq: 'qq', kuwo: 'kuwo' };
+            const platform = platformMap[track.source];
+            if (!platform) return track;
 
-                // For Kuwo, prioritizing the proxy logic that handles SSL issues
-                const sid = track.songId || (track.id && String(track.id).includes('-') ? String(track.id).split('-')[1] : track.id);
-                if (track.source === 'kuwo' && sid && !rawCover) {
-                    track.cover = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, track.source);
-                } else {
-                    track.cover = this.getProxyUrl(rawCover, track.source);
-                }
-                track.lrc = track.lrc || (track.originalData && track.originalData.lrc) || '';
-            } else {
-                // Automatic quality degradation: start from preferred quality
-                const qualities = this.getQualityChain(this.preferredQuality);
-                let detailData = null;
+            // 调用 TuneHub 解析 API
+            const parseUrl = `${this.endpoints.worker}/tunehub/parse`;
+            const qualities = this.getQualityChain(this.preferredQuality);
 
-                const sid = track.songId || (track.id && String(track.id).includes('-') ? String(track.id).split('-')[1] : track.id);
+            let parseResult = null;
+            for (const quality of qualities) {
+                try {
+                    const res = await fetch(parseUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            platform,
+                            ids: sid,
+                            quality
+                        })
+                    });
+                    const json = await res.json();
+                    console.log('TuneHub parse response:', json);
 
-                if (sid) {
-                    for (const br of qualities) {
-                        try {
-                            const apiUrl = `${this.endpoints.base}?source=${track.source}&id=${sid}&type=url&br=${br}`;
-                            const controller = new AbortController();
-                            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5s timeout
-
-                            // For kuwo, don't follow redirects to avoid CORS issues
-                            const fetchOptions = {
-                                signal: controller.signal,
-                                redirect: track.source === 'kuwo' ? 'manual' : 'follow'
-                            };
-
-                            const res = await fetch(apiUrl, fetchOptions);
-                            clearTimeout(timeoutId);
-
-                            // Handle redirect for kuwo - the API redirects to CDN URL
-                            if (track.source === 'kuwo' && (res.status === 301 || res.status === 302 || res.type === 'opaqueredirect')) {
-                                // For kuwo, use the API URL directly as it acts as a proxy
-                                detailData = { url: apiUrl };
-                                break;
-                            }
-
-                            if (!res.ok) continue;
-
-                            const text = await res.text();
-                            if (!text || text.startsWith('fLaC') || text.startsWith('ID3')) {
-                                // It's a raw audio stream, use the API URL as the audio source
-                                detailData = { url: apiUrl };
-                                break;
-                            }
-
-                            const json = JSON.parse(text);
-                            if (json.code === 200 && json.data && json.data.url) {
-                                detailData = json.data;
-                                break;
-                            }
-                        } catch (e) {
-                            if (e.name === 'AbortError') console.log('Request timeout for', br);
-                            continue;
+                    // 处理多种可能的返回格式
+                    if (json.code === 0 && json.data) {
+                        // 格式0: { data: { data: [{ url: "..." }] } } - 嵌套 data 结构 (新增)
+                        if (json.data.data && Array.isArray(json.data.data) && json.data.data.length > 0) {
+                            parseResult = json.data.data[0];
+                            break;
+                        }
+                        // 格式1: { data: { url: "..." } } - 单曲直接返回对象
+                        if (json.data.url) {
+                            parseResult = json.data;
+                            break;
+                        }
+                        // 格式2: { data: [{ url: "..." }] } - 数组
+                        if (Array.isArray(json.data) && json.data.length > 0) {
+                            parseResult = json.data[0];
+                            break;
+                        }
+                        // 格式3: { data: { songs: [...] } } - TuneHub 标准
+                        if (json.data.songs && json.data.songs.length > 0) {
+                            parseResult = json.data.songs[0];
+                            break;
                         }
                     }
-
-                    // If we got URL but missing cover/lrc, fetch them separately
-                    if (detailData && sid) {
-                        // Fetch cover if missing
-                        if (!detailData.pic && !track.cover) {
-                            track.cover = this.getProxyUrl(`${this.endpoints.base}?source=${track.source}&id=${sid}&type=pic`, track.source);
-                        } else if (track.source === 'kuwo' && sid) {
-                            // For Kuwo, prioritize proxying the raw cover we found
-                            track.cover = this.getProxyUrl(detailData.pic || track.cover, track.source);
-                        }
-                        // Fetch lyrics if missing
-                        if (!detailData.lrc && !track.lrc) {
-                            const lrcUrl = `${this.endpoints.base}?source=${track.source}&id=${sid}&type=lrc`;
-                            track.lrc = lrcUrl; // Will be fetched below
-                        }
-                    }
+                } catch (e) {
+                    console.warn(`TuneHub parse failed for quality ${quality}:`, e);
                 }
+            }
 
-                if (detailData) {
-                    track.url = this.getProxyUrl(detailData.url, track.source);
-                    track.cover = this.getProxyUrl(detailData.pic || track.cover, track.source);
-                    track.lrc = detailData.lrc || track.lrc;
+            if (parseResult) {
+                track.url = parseResult.url || track.url;
+                // For kuwo, proxy the cover URL due to SSL cert issues
+                let coverUrl = parseResult.cover || track.cover;
+                if (coverUrl && track.source === 'kuwo') {
+                    coverUrl = this.getProxyUrl(coverUrl, 'kuwo');
+                }
+                track.cover = coverUrl;
+                track.lrc = parseResult.lyrics || parseResult.lyric || track.lrc;
+                track.actualQuality = parseResult.actualQuality;
+
+                // 处理歌词
+                if (track.lrc && typeof track.lrc === 'object' && track.lrc.original) {
+                    track.lrc = track.lrc.original;
                 }
             }
 
@@ -313,14 +433,6 @@ const MusicAPI = {
                 this.urlCache.set(cacheKey, { url: track.url, cover: track.cover, lrc: track.lrc });
             }
 
-            // If we have a lyric URL, fetch it synchronously for better UX
-            if (typeof track.lrc === 'string' && track.lrc.startsWith('http')) {
-                try {
-                    track.lrc = await this.fetchLrcText(track.lrc);
-                } catch (e) {
-                    console.warn('Failed to fetch lyrics:', e);
-                }
-            }
         } catch (e) {
             console.error("Detail fetch error:", e);
         }
@@ -357,42 +469,15 @@ const MusicAPI = {
         return null;
     },
 
+    // 获取歌单歌曲
     async getPlaylistSongs(source, playlistId) {
         try {
-            const url = `${this.endpoints.base}?source=${source}&id=${playlistId}&type=playlist`;
-            const res = await fetch(url);
-            const json = await res.json();
-
-            if (json.code === 200 && json.data) {
-                const list = json.data.list || json.data.results || (Array.isArray(json.data) ? json.data : []);
-                if (!Array.isArray(list)) return { name: '未知歌单', tracks: [] };
-
-                return {
-                    name: (json.data.info && json.data.info.name) ? json.data.info.name : '未知歌单',
-                    tracks: list.map(s => {
-                        const sid = String(s.id || s.songid || s.mid || '');
-                        const src = s.platform || s.source || source;
-                        let coverUrl = s.pic || s.cover || '';
-                        // Prefer raw URL + getProxyUrl over the redirector
-                        if (coverUrl) {
-                            coverUrl = this.getProxyUrl(coverUrl, src);
-                        } else if (src === 'kuwo' && sid) {
-                            coverUrl = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, src);
-                        }
-                        return {
-                            id: `${src}-${sid}`,
-                            songId: sid,
-                            title: s.name || s.title || '未知歌曲',
-                            artist: s.artist || s.author || '未知歌手',
-                            album: s.album || '-',
-                            cover: coverUrl,
-                            source: src,
-                            url: s.url || '',
-                            lrc: s.lrc || '',
-                            types: s.types || []
-                        };
-                    }).filter(s => s.songId)
-                };
+            if (source === 'netease') {
+                return await this._getPlaylistNetease(playlistId);
+            } else if (source === 'qq') {
+                return await this._getPlaylistQQ(playlistId);
+            } else if (source === 'kuwo') {
+                return await this._getPlaylistKuwo(playlistId);
             }
         } catch (e) {
             console.error("Playlist songs fetch error:", e);
@@ -400,26 +485,157 @@ const MusicAPI = {
         return { name: '未知歌单', tracks: [] };
     },
 
+    async _getPlaylistNetease(playlistId) {
+        const url = `${this.endpoints.netease}/playlist/detail?id=${playlistId}`;
+        const res = await fetch(url);
+        const json = await res.json();
+
+        if (json.code !== 200 || !json.playlist) return { name: '未知歌单', tracks: [] };
+
+        const playlist = json.playlist;
+        // Remove limit, get all trackIds
+        const trackIds = playlist.trackIds ? playlist.trackIds.map(t => t.id) : [];
+
+        // Batch fetch details (chunk size 50 to avoid URL length limit)
+        let tracks = [];
+        if (trackIds.length > 0) {
+            const CHUNK_SIZE = 50;
+            const chunks = [];
+            for (let i = 0; i < trackIds.length; i += CHUNK_SIZE) {
+                chunks.push(trackIds.slice(i, i + CHUNK_SIZE));
+            }
+
+            // Fetch chunks (Sequential to ensure stability)
+            const detailMap = new Map();
+            for (const chunkIds of chunks) {
+                try {
+                    const detailUrl = `${this.endpoints.netease}/song/detail?ids=${chunkIds.join(',')}`;
+                    const detailRes = await fetch(detailUrl);
+                    const detailJson = await detailRes.json();
+                    if (detailJson.songs) {
+                        detailJson.songs.forEach(s => detailMap.set(String(s.id), s));
+                    }
+                } catch (e) { console.error("Chunk fetch failed", e); }
+            }
+
+            // Map back to maintain trackIds order
+            tracks = trackIds.map(tid => {
+                const item = detailMap.get(String(tid));
+                if (!item) return null;
+                return {
+                    id: `netease-${item.id}`,
+                    songId: String(item.id),
+                    title: item.name || '未知歌曲',
+                    artist: item.ar ? item.ar.map(a => a.name).join(', ') : '未知歌手',
+                    album: item.al ? item.al.name : '-',
+                    cover: item.al && item.al.picUrl ? item.al.picUrl : '',
+                    source: 'netease'
+                };
+            }).filter(t => t !== null);
+        }
+
+        return {
+            name: playlist.name || '未知歌单',
+            tracks
+        };
+    },
+
+    async _getPlaylistQQ(playlistId) {
+        // Use verified official API with large limit (10000) to ensure full import
+        const targetUrl = `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=${playlistId}&format=json&song_begin=0&song_num=10000`;
+
+        const url = `${this.endpoints.worker}/tunehub/request`;
+        const fetchOptions = {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: targetUrl,
+                method: 'GET',
+                headers: {
+                    'Referer': 'https://y.qq.com/',
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                }
+            })
+        };
+
+        try {
+            const res = await fetch(url, fetchOptions);
+            const result = await res.json();
+
+            // Handle worker proxy response wrapper
+            let data = result;
+            if (result.success && result.data) {
+                data = result.data;
+                if (typeof data === 'string') {
+                    try { data = JSON.parse(data); } catch (e) { }
+                }
+            }
+
+            if (!data.cdlist || !data.cdlist[0]) return { name: '未知歌单', tracks: [] };
+
+            const cd = data.cdlist[0];
+            const tracks = (cd.songlist || []).map(item => ({
+                id: `qq-${item.songmid}`,
+                songId: item.songmid,
+                title: item.songname || '未知歌曲',
+                artist: item.singer ? item.singer.map(s => s.name).join(', ') : '未知歌手',
+                album: item.albumname || '-',
+                cover: item.albummid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${item.albummid}.jpg` : '',
+                source: 'qq'
+            }));
+
+            return {
+                name: cd.dissname || '未知歌单',
+                tracks
+            };
+        } catch (e) {
+            console.error('QQ Playlist Import Error:', e);
+            throw e;
+        }
+    },
+
+    async _getPlaylistKuwo(playlistId) {
+        // Increase limit to 2000
+        const targetUrl = `http://nplserver.kuwo.cn/pl.svc?op=getlistinfo&pid=${playlistId}&pn=0&rn=2000&encode=utf8&keyset=pl2012&vipver=MUSIC_9.0.5.0_W1&newver=1`;
+        const url = `${this.endpoints.worker}/tunehub/request`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: targetUrl,
+                method: 'GET',
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            })
+        });
+        const result = await res.json();
+
+        if (!result.success || !result.data || !result.data.musiclist) return { name: '未知歌单', tracks: [] };
+
+        const tracks = result.data.musiclist.map(item => ({
+            id: `kuwo-${item.id}`,
+            songId: String(item.id),
+            title: item.name || '未知歌曲',
+            artist: item.artist || '未知歌手',
+            album: item.album || '-',
+            cover: item.pic ? this.getProxyUrl(item.pic.replace('_120.', '_500.'), 'kuwo') : '',
+            source: 'kuwo'
+        }));
+
+        return {
+            name: result.data.title || '未知歌单',
+            tracks
+        };
+    },
+
+    // 获取排行榜列表
     async getBillboardList(source) {
         try {
-            const url = `${this.endpoints.base}?source=${source}&type=toplists`;
-            const res = await fetch(url);
-            const json = await res.json();
-            if (json.code === 200 && json.data) {
-                const list = json.data.list || json.data.results || (Array.isArray(json.data) ? json.data : []);
-                return list.map(item => {
-                    let picUrl = item.pic || item.cover || item.image || '';
-                    // Proxy image URLs to fix certificate errors, especially for Kuwo
-                    if (picUrl) {
-                        picUrl = this.getProxyUrl(picUrl, source);
-                    }
-                    return {
-                        id: item.id || item.uid,
-                        name: item.name || item.title || '未知榜单',
-                        pic: picUrl,
-                        updateFrequency: item.updateFrequency || ''
-                    };
-                });
+            if (source === 'netease') {
+                return await this._getToplistsNetease();
+            } else if (source === 'qq') {
+                return await this._getToplistsQQ();
+            } else if (source === 'kuwo') {
+                return await this._getToplistsKuwo();
             }
         } catch (e) {
             console.error("Billboard list fetch error:", e);
@@ -427,39 +643,94 @@ const MusicAPI = {
         return [];
     },
 
+    async _getToplistsNetease() {
+        const url = `${this.endpoints.netease}/toplist`;
+        const res = await fetch(url);
+        const json = await res.json();
+
+        if (json.code !== 200 || !json.list) return [];
+
+        return json.list.map(item => ({
+            id: String(item.id),
+            name: item.name || '未知榜单',
+            pic: item.coverImgUrl || '',
+            updateFrequency: item.updateFrequency || ''
+        }));
+    },
+
+    async _getToplistsQQ() {
+        const targetUrl = 'https://u.y.qq.com/cgi-bin/musicu.fcg';
+        const body = {
+            comm: { cv: 4747474, ct: 24, format: "json", inCharset: "utf-8", outCharset: "utf-8", uin: 0 },
+            toplist: { module: "musicToplist.ToplistInfoServer", method: "GetAll", param: {} }
+        };
+
+        const url = `${this.endpoints.worker}/tunehub/request`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: targetUrl,
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Referer': 'https://y.qq.com/' },
+                body: body
+            })
+        });
+        const result = await res.json();
+
+        if (!result.success || !result.data || !result.data.toplist || !result.data.toplist.data || !result.data.toplist.data.group) {
+            return [];
+        }
+
+        const toplists = [];
+        result.data.toplist.data.group.forEach(group => {
+            (group.toplist || []).forEach(item => {
+                toplists.push({
+                    id: String(item.topId),
+                    name: item.title || '未知榜单',
+                    pic: item.headPicUrl || item.frontPicUrl || '',
+                    updateFrequency: item.updateType === 1 ? '每日更新' : '每周更新'
+                });
+            });
+        });
+        return toplists;
+    },
+
+    async _getToplistsKuwo() {
+        const targetUrl = 'http://qukudata.kuwo.cn/q.k?op=query&cont=tree&node=2&pn=0&rn=1000&fmt=json&level=2';
+        const url = `${this.endpoints.worker}/tunehub/request`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: targetUrl,
+                method: 'GET',
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            })
+        });
+        const result = await res.json();
+
+        if (!result.success || !result.data || !result.data.child) return [];
+
+        return result.data.child
+            .filter(item => item.source === '1')
+            .map(item => ({
+                id: item.sourceid,
+                name: item.name || '未知榜单',
+                pic: item.pic ? this.getProxyUrl(item.pic, 'kuwo') : '',
+                updateFrequency: item.info || '定期更新'
+            }));
+    },
+
+    // 获取排行榜详情
     async getBillboardDetail(source, id) {
         try {
-            // Use type=toplist for billboard detail (not toplists)
-            const url = `${this.endpoints.base}?type=toplist&source=${source}&id=${id}`;
-            const res = await fetch(url);
-            const json = await res.json();
-            if (json.code === 200 && json.data) {
-                const list = json.data.list || json.data.results || json.data.songs || (Array.isArray(json.data) ? json.data : []);
-                if (!Array.isArray(list)) return [];
-
-                return list.map(s => {
-                    const sid = String(s.id || s.songid || s.mid || '');
-                    // For Kuwo, use API proxy or raw URL + getProxyUrl
-                    let coverUrl = s.pic || s.cover || '';
-                    if (source === 'kuwo') {
-                        if (coverUrl) {
-                            coverUrl = this.getProxyUrl(coverUrl, source);
-                        } else if (sid) {
-                            coverUrl = this.getProxyUrl(`${this.endpoints.base}?source=kuwo&id=${sid}&type=pic`, source);
-                        }
-                    }
-                    return {
-                        id: `${source}-${sid}`,
-                        songId: sid,
-                        title: s.name || s.title || '未知歌曲',
-                        artist: s.artist || s.author || '未知歌手',
-                        album: s.album || '-',
-                        cover: coverUrl,
-                        source: source,
-                        url: s.url || '',
-                        lrc: s.lrc || ''
-                    };
-                }).filter(s => s.songId);
+            if (source === 'netease') {
+                return await this._getToplistDetailNetease(id);
+            } else if (source === 'qq') {
+                return await this._getToplistDetailQQ(id);
+            } else if (source === 'kuwo') {
+                return await this._getToplistDetailKuwo(id);
             }
         } catch (e) {
             console.error("Billboard detail fetch error:", e);
@@ -467,30 +738,108 @@ const MusicAPI = {
         return [];
     },
 
-    async fetchLrcText(lrcUrl) {
-        if (!lrcUrl || !lrcUrl.startsWith('http')) return lrcUrl;
-        const proxies = [
-            `https://corsproxy.io/?url=${encodeURIComponent(lrcUrl)}`,
-            `https://api.allorigins.win/raw?url=${encodeURIComponent(lrcUrl)}`
-        ];
+    async _getToplistDetailNetease(id) {
+        const url = `${this.endpoints.netease}/playlist/detail?id=${id}`;
+        const res = await fetch(url);
+        const json = await res.json();
 
-        for (const proxyUrl of proxies) {
-            try {
-                const lrcRes = await fetch(proxyUrl);
-                if (lrcRes.ok) {
-                    const text = await lrcRes.text();
-                    if (text && text.length > 20 && !text.trim().startsWith('<')) {
-                        return text;
-                    }
-                }
-            } catch (e) {
-                console.warn(`Lyric proxy failed: ${proxyUrl}`, e);
-            }
-        }
-        return lrcUrl;
+        if (json.code !== 200 || !json.playlist) return [];
+
+        const trackIds = json.playlist.trackIds ? json.playlist.trackIds.map(t => t.id).slice(0, 100) : [];
+        if (trackIds.length === 0) return [];
+
+        const detailUrl = `${this.endpoints.netease}/song/detail?ids=${trackIds.join(',')}`;
+        const detailRes = await fetch(detailUrl);
+        const detailJson = await detailRes.json();
+
+        if (!detailJson.songs) return [];
+
+        return detailJson.songs.map(item => ({
+            id: `netease-${item.id}`,
+            songId: String(item.id),
+            title: item.name || '未知歌曲',
+            artist: item.ar ? item.ar.map(a => a.name).join(', ') : '未知歌手',
+            album: item.al ? item.al.name : '-',
+            cover: item.al && item.al.picUrl ? item.al.picUrl : '',
+            source: 'netease'
+        }));
     },
 
-    // Compatibility methods - all now go through common search
-    async searchNetease(keyword, page, limit) { return this.search(keyword, 'netease', page, limit); },
-    async searchCommon(keyword, source, page, limit) { return this.search(keyword, source, page, limit); }
+    async _getToplistDetailQQ(id) {
+        const targetUrl = 'https://u.y.qq.com/cgi-bin/musicu.fcg';
+        const body = {
+            comm: { cv: 4747474, ct: 24, format: "json", inCharset: "utf-8", outCharset: "utf-8", uin: 0 },
+            req: { module: "musicToplist.ToplistInfoServer", method: "GetDetail", param: { topid: parseInt(id), num: 100, period: "" } }
+        };
+
+        const url = `${this.endpoints.worker}/tunehub/request`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: targetUrl,
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Referer': 'https://y.qq.com/' },
+                body: body
+            })
+        });
+        const result = await res.json();
+
+        if (!result.success || !result.data || !result.data.req || !result.data.req.data || !result.data.req.data.songInfoList) {
+            return [];
+        }
+
+        return result.data.req.data.songInfoList.map(item => ({
+            id: `qq-${item.mid}`,
+            songId: item.mid,
+            title: item.name || '未知歌曲',
+            artist: item.singer ? item.singer.map(s => s.name).join(', ') : '未知歌手',
+            album: item.album ? item.album.name : '-',
+            cover: item.album && item.album.mid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${item.album.mid}.jpg` : '',
+            source: 'qq'
+        }));
+    },
+
+    async _getToplistDetailKuwo(id) {
+        const targetUrl = `http://kbangserver.kuwo.cn/ksong.s?from=pc&fmt=json&pn=0&rn=100&type=bang&data=content&id=${id}&show_copyright_off=0&pcmp4=1&isbang=1`;
+        const url = `${this.endpoints.worker}/tunehub/request`;
+        const res = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                url: targetUrl,
+                method: 'GET',
+                headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' }
+            })
+        });
+        const result = await res.json();
+
+        if (!result.success || !result.data || !result.data.musiclist) return [];
+
+        return result.data.musiclist.map(item => ({
+            id: `kuwo-${item.id}`,
+            songId: String(item.id),
+            title: item.name || '未知歌曲',
+            artist: item.artist || '未知歌手',
+            album: item.album || '-',
+            cover: item.pic ? this.getProxyUrl(item.pic.replace('_120.', '_500.'), 'kuwo') : '',
+            source: 'kuwo'
+        }));
+    },
+
+    async fetchLrcText(lrcUrl) {
+        if (!lrcUrl || !lrcUrl.startsWith('http')) return lrcUrl;
+
+        // Use proxy for lrc mostly to avoid CORS
+        const url = this.getProxyUrl(lrcUrl);
+        try {
+            const res = await fetch(url);
+            return await res.text();
+        } catch (e) {
+            console.error("LRC fetch failed:", e);
+            return '';
+        }
+    }
 };
+
+window.MusicAPI = MusicAPI;

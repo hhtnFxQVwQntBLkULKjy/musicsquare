@@ -1,10 +1,19 @@
 document.addEventListener('DOMContentLoaded', () => {
     const loginForm = document.getElementById('login-form');
     const registerForm = document.getElementById('register-form');
+    const forgotPasswordForm = document.getElementById('forgot-password-form');
     const goRegisterBtn = document.getElementById('go-register');
     const goLoginBtn = document.getElementById('go-login');
+    const goForgotPasswordBtn = document.getElementById('go-forgot-password');
+    const goLoginFromForgotBtn = document.getElementById('go-login-from-forgot');
     const loginBtn = document.getElementById('login-btn');
     const registerBtn = document.getElementById('register-btn');
+    const checkUserBtn = document.getElementById('check-user-btn');
+    const resetPasswordBtn = document.getElementById('reset-password-btn');
+    const resetPasswordSection = document.getElementById('reset-password-section');
+
+    // Store verified username for password reset
+    let verifiedUsername = null;
 
     // Toast Helper
     function showToast(msg, type = 'error') {
@@ -66,11 +75,113 @@ document.addEventListener('DOMContentLoaded', () => {
     goRegisterBtn.addEventListener('click', () => {
         loginForm.style.display = 'none';
         registerForm.style.display = 'block';
+        forgotPasswordForm.style.display = 'none';
     });
 
     goLoginBtn.addEventListener('click', () => {
         registerForm.style.display = 'none';
         loginForm.style.display = 'block';
+        forgotPasswordForm.style.display = 'none';
+    });
+
+    // Forgot Password Navigation
+    goForgotPasswordBtn.addEventListener('click', () => {
+        loginForm.style.display = 'none';
+        registerForm.style.display = 'none';
+        forgotPasswordForm.style.display = 'block';
+        resetPasswordSection.style.display = 'none';
+        verifiedUsername = null;
+        document.getElementById('forgot-username').value = '';
+        document.getElementById('new-password').value = '';
+        document.getElementById('confirm-new-password').value = '';
+    });
+
+    goLoginFromForgotBtn.addEventListener('click', () => {
+        forgotPasswordForm.style.display = 'none';
+        loginForm.style.display = 'block';
+        resetPasswordSection.style.display = 'none';
+        verifiedUsername = null;
+    });
+
+    // Check User Exists for Password Reset
+    checkUserBtn.addEventListener('click', async () => {
+        const username = document.getElementById('forgot-username').value.trim();
+
+        if (!username) {
+            showToast('请输入用户名', 'error');
+            return;
+        }
+
+        checkUserBtn.disabled = true;
+        checkUserBtn.textContent = '验证中...';
+
+        try {
+            const exists = await AuthService.checkUserExists(username);
+            if (exists) {
+                verifiedUsername = username;
+                resetPasswordSection.style.display = 'block';
+                document.getElementById('forgot-username').disabled = true;
+                checkUserBtn.style.display = 'none';
+                showToast('账号验证成功，请设置新密码', 'success');
+            } else {
+                showToast('该账号不存在', 'error');
+            }
+        } catch (e) {
+            showToast(e.message || '验证失败，请稍后重试', 'error');
+        } finally {
+            checkUserBtn.disabled = false;
+            checkUserBtn.textContent = '验证账号';
+        }
+    });
+
+    // Reset Password Logic
+    resetPasswordBtn.addEventListener('click', async () => {
+        const newPassword = document.getElementById('new-password').value.trim();
+        const confirmPassword = document.getElementById('confirm-new-password').value.trim();
+
+        if (!newPassword || !confirmPassword) {
+            showToast('请填写所有字段', 'error');
+            return;
+        }
+
+        if (newPassword !== confirmPassword) {
+            showToast('两次输入的密码不一致', 'error');
+            return;
+        }
+
+        if (!verifiedUsername) {
+            showToast('请先验证账号', 'error');
+            return;
+        }
+
+        resetPasswordBtn.disabled = true;
+        resetPasswordBtn.textContent = '重置中...';
+
+        try {
+            await AuthService.resetPassword(verifiedUsername, newPassword);
+
+            // Show success toast
+            const container = document.querySelector('.toast-container') || createToastContainer();
+            const toast = document.createElement('div');
+            toast.className = 'toast register-success';
+            toast.innerHTML = `<i class="fas fa-check-circle" style="font-size:24px;"></i> 密码重置成功，请重新登录`;
+            container.appendChild(toast);
+
+            // Auto fill login form and switch
+            document.getElementById('username').value = verifiedUsername;
+            document.getElementById('password').value = newPassword;
+
+            setTimeout(() => {
+                goLoginFromForgotBtn.click();
+                document.getElementById('forgot-username').disabled = false;
+                checkUserBtn.style.display = 'block';
+            }, 1500);
+        } catch (e) {
+            showToast(e.message || '重置密码失败，请稍后重试', 'error');
+        } finally {
+            resetPasswordBtn.disabled = false;
+            resetPasswordBtn.textContent = '重置密码';
+        }
     });
 
     // Login Logic

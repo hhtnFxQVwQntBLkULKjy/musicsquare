@@ -69,6 +69,17 @@ body {
 .btn-primary:hover { background: #15b38a; transform: translateY(-2px); box-shadow: 0 6px 16px rgba(30,207,159,0.4); }
 .btn-primary:active { transform: translateY(0); }
 
+/* 次要按钮样式 */
+.btn-secondary {
+  background: #f0f0f0 !important;
+  color: #666 !important;
+  box-shadow: none !important;
+}
+.btn-secondary:hover {
+  background: #e0e0e0 !important;
+  transform: translateY(-2px);
+}
+
 .footer-links { margin-top: 25px; font-size: 13px; color: var(--text-sub); }
 .footer-links a { color: var(--primary-color); text-decoration: none; font-weight: 500; cursor: pointer; margin-left: 5px; }
 .footer-links a:hover { text-decoration: underline; }

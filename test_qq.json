@@ -1,0 +1,9 @@
+{
+    "url": "https://u.y.qq.com/cgi-bin/musicu.fcg",
+    "method": "POST",
+    "headers": {
+        "Referer": "https://y.qq.com/",
+        "Content-Type": "application/json"
+    },
+    "body": "{\"comm\":{\"cv\":4747474,\"ct\":24,\"format\":\"json\"},\"req\":{\"method\":\"DoSearchForQQMusicDesktop\",\"module\":\"music.search.SearchCgiService\",\"param\":{\"query\":\"周杰伦\",\"page_num\":1,\"num_per_page\":10}}}"
+}

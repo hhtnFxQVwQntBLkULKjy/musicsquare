@@ -1,4 +1,4 @@
-
+﻿
 export default {
     async fetch(request, env) {
         // 1. CORS Headers
@@ -38,20 +38,20 @@ export default {
         if (path === "/api/auth/register" && request.method === "POST") {
             try {
                 const { username, password } = await request.json();
-                if (!username || !password) return error("Missing username or password");
+                if (!username || !password) return error("请输入用户名和密码");
 
                 const exists = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(username).first();
-                if (exists) return error("Username already exists");
+                if (exists) return error("该用户名已存在");
 
                 const avatar = `https://ui-avatars.com/api/?name=${username}&background=random`;
                 const res = await env.DB.prepare(
                     "INSERT INTO users (username, password, avatar, created_at) VALUES (?, ?, ?, ?)"
                 ).bind(username, password, avatar, Date.now()).run();
 
-                if (res.success) return json({ success: true, message: "User created" });
-                return error("Failed to create user");
+                if (res.success) return json({ success: true, message: "注册成功" });
+                return error("注册失败，请稍后重试");
             } catch (e) {
-                return error(e.message, 500);
+                return error("注册失败: " + e.message, 500);
             }
         }
 
@@ -63,17 +63,50 @@ export default {
                     "SELECT * FROM users WHERE username = ? AND password = ?"
                 ).bind(username, password).first();
 
-                if (!user) return error("Invalid credentials", 401);
+                if (!user) return error("用户名或密码错误", 401);
                 return json({ success: true, user: { id: user.id, username: user.username, avatar: user.avatar } });
             } catch (e) {
-                return error(e.message, 500);
+                return error("登录失败: " + e.message, 500);
             }
         }
 
-        // 3. User: Profile Update (Avatar)
+        // 3. Auth: Check User Exists (for password reset)
+        if (path === "/api/auth/check-user" && request.method === "POST") {
+            try {
+                const { username } = await request.json();
+                if (!username) return error("请输入用户名");
+
+                // Debug log
+                console.log(`Checking user exists: [${username}]`);
+                const user = await env.DB.prepare("SELECT id, username FROM users WHERE username = ?").bind(username).first();
+                console.log(`Check result:`, user);
+
+                return json({ exists: !!user });
+            } catch (e) {
+                return error("验证失败: " + e.message, 500);
+            }
+        }
+
+        // 4. Auth: Reset Password (no verification required)
+        if (path === "/api/auth/reset-password" && request.method === "POST") {
+            try {
+                const { username, newPassword } = await request.json();
+                if (!username || !newPassword) return error("缺少用户名或新密码");
+
+                const user = await env.DB.prepare("SELECT id FROM users WHERE username = ?").bind(username).first();
+                if (!user) return error("该账号不存在", 404);
+
+                await env.DB.prepare("UPDATE users SET password = ? WHERE id = ?").bind(newPassword, user.id).run();
+                return json({ success: true, message: "密码重置成功" });
+            } catch (e) {
+                return error("重置密码失败: " + e.message, 500);
+            }
+        }
+
+        // 5. User: Profile Update (Avatar)
         if (path === "/api/user/profile" && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { avatar, username } = await request.json();
 
             if (username) {
@@ -86,214 +119,124 @@ export default {
             return json({ success: true });
         }
 
-        // 9. Netease & QQ QR Code Login
+        // 9. TuneHub API 代理
 
-        // === QQ Music QR Code (Stateless) ===
-        if (path === "/api/qq/qr/create" && request.method === "GET") {
+        // === TuneHub 歌曲解析代理 ===
+        if (path === "/api/tunehub/parse" && request.method === "POST") {
             try {
-                const qqProxyUrl = "https://corsproxy.io/?url=" + encodeURIComponent(
-                    "https://ssl.ptlogin2.qq.com/ptqrshow?appid=716027609&e=2&l=M&s=3&d=72&v=4&t=0.8"
-                );
+                const body = await request.json();
+                const { platform, ids, quality } = body;
 
-                const res = await fetch(qqProxyUrl, {
-                    headers: {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-                    }
-                });
-
-                const setCookie = res.headers.get("set-cookie");
-                let qrsig = "";
-                if (setCookie) {
-                    const match = setCookie.match(/qrsig=([^;]+)/);
-                    if (match) qrsig = match[1];
+                if (!platform || !ids) {
+                    return error("Missing platform or ids");
                 }
 
-                const arrayBuffer = await res.arrayBuffer();
-                let binary = '';
-                const bytes = new Uint8Array(arrayBuffer);
-                const len = bytes.byteLength;
-                for (let i = 0; i < len; i++) {
-                    binary += String.fromCharCode(bytes[i]);
-                }
-                const base64 = btoa(binary);
-
-                return json({
-                    success: true,
-                    qrsig,
-                    image: `data:image/png;base64,${base64}`,
-                    tip: "请使用QQ或微信扫描二维码"
-                });
-            } catch (e) {
-                return json({
-                    success: true,
-                    qrsig: "fallback_" + Date.now(),
-                    image: "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=https%3A%2F%2Fy.qq.com%2F",
-                    tip: "扫码后请在QQ音乐网页版登录"
-                });
-            }
-        }
-
-        if (path === "/api/qq/qr/check" && request.method === "POST") {
-            try {
-                const { qrsig } = await request.json();
-                if (!qrsig) return error("Missing qrsig");
-
-                let hash = 0;
-                for (let i = 0; i < qrsig.length; ++i) {
-                    hash += (hash << 5) + qrsig.charCodeAt(i);
-                }
-                const ptqrtoken = hash & 0x7fffffff;
-
-                const checkUrl = `https://ssl.ptlogin2.qq.com/ptqrlogin?ptqrtoken=${ptqrtoken}&u1=https%3A%2F%2Fy.qq.com%2F&ptredirect=0&h=1&t=1&g=1&from_ui=1&ptlang=2052`;
-                const proxyUrl = "https://corsproxy.io/?url=" + encodeURIComponent(checkUrl);
-
-                const res = await fetch(proxyUrl, {
-                    headers: {
-                        "Cookie": `qrsig=${qrsig}`,
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-                    }
-                });
-                const text = await res.text();
-
-                if (text.includes("登录成功")) {
-                    const cookies = res.headers.get("set-cookie");
-
-                    // Extract UIN from cookies or response text if possible
-                    let uin = "";
-                    const uinMatch = cookies ? cookies.match(/uin=o(\d+)/) : null;
-                    if (uinMatch) uin = uinMatch[1];
-
-                    return json({
-                        success: true,
-                        status: 2,
-                        message: "登录成功",
-                        cookies: cookies,
-                        uin: uin
-                    });
-                } else if (text.includes("二维码未失效")) {
-                    return json({ success: true, status: 0, message: "等待扫码" });
-                } else if (text.includes("二维码认证中")) {
-                    return json({ success: true, status: 1, message: "已扫码，请确认" });
-                } else {
-                    return json({ success: true, status: -1, message: "二维码已过期" });
-                }
-            } catch (e) {
-                return error("Check failed: " + e.message, 500);
-            }
-        }
-
-        // === QQ User Info (Stateless Proxy) ===
-        if (path === "/api/qq/userinfo" && request.method === "POST") {
-            try {
-                const { uin, cookies } = await request.json();
-                // Proxy to QQ Music Profile API
-                const targetUrl = `https://c.y.qq.com/rsc/fcgi-bin/fcg_get_profile_homepage.fcg?cid=205360838&reqfrom=1&reqtype=0&userid=${uin}`;
-                const proxyUrl = "https://corsproxy.io/?url=" + encodeURIComponent(targetUrl);
-
-                const res = await fetch(proxyUrl, {
-                    headers: {
-                        "Cookie": cookies,
-                        "Referer": "https://y.qq.com/"
-                    }
-                });
-                const text = await res.text();
-
-                // Extract JSON from JSONP: callback({...})
-                const match = text.match(/callback\((.*)\)/);
-                let nickname = "QQ用户";
-                let avatar = "";
-
-                if (match) {
-                    const data = JSON.parse(match[1]);
-                    if (data.data) {
-                        nickname = data.data.nickname;
-                        avatar = data.data.headpic;
-                    }
-                }
-
-                return json({ success: true, nickname, avatar });
-            } catch (e) {
-                return json({ success: false, error: e.message });
-            }
-        }
-
-        // === Netease Music QR Code ===
-        if (path === "/api/netease/qr/create" && request.method === "GET") {
-            try {
-                // Official API
-                const keyRes = await fetch("https://music.163.com/weapi/login/qrcode/unikey?csrf_token=", {
+                const tuneHubRes = await fetch("https://tunehub.sayqz.com/api/v1/parse", {
                     method: "POST",
                     headers: {
-                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Referer": "https://music.163.com/"
+                        "Content-Type": "application/json",
+                        "X-API-Key": env.TUNEHUB_API_KEY
                     },
-                    body: "type=1"
+                    body: JSON.stringify({
+                        platform,
+                        ids,
+                        quality: quality || "320k"
+                    })
                 });
-                const keyJson = await keyRes.json();
 
-                if (keyJson.code !== 200) {
-                    // Backup API
-                    const backupRes = await fetch(`https://netease-cloud-music-api-liard.vercel.app/login/qr/key?timestamp=${Date.now()}`);
-                    const backupJson = await backupRes.json();
-                    if (backupJson.data && backupJson.data.unikey) {
-                        const unikey = backupJson.data.unikey;
-                        const qrUrl = `https://music.163.com/login?codekey=${unikey}`;
-                        return json({
-                            success: true,
-                            unikey,
-                            image: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}`,
-                            url: qrUrl
-                        });
-                    }
-                    return error("Failed to get unikey");
-                }
-
-                const unikey = keyJson.unikey;
-                const qrUrl = `https://music.163.com/login?codekey=${unikey}`;
-                return json({
-                    success: true,
-                    unikey,
-                    image: `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qrUrl)}`,
-                    url: qrUrl
-                });
+                const data = await tuneHubRes.json();
+                return json(data);
             } catch (e) {
-                return error("Failed to create Netease QR: " + e.message, 500);
+                return error("TuneHub parse failed: " + e.message, 500);
             }
         }
 
-        if (path === "/api/netease/qr/check" && request.method === "POST") {
+        // === TuneHub 方法配置代理 ===
+        if (path.startsWith("/api/tunehub/methods") && request.method === "GET") {
             try {
-                const { unikey } = await request.json();
-                const url = `https://music.163.com/api/login/qrcode/client/login?type=1&key=${unikey}&timestamp=${Date.now()}`;
-                const res = await fetch(url, { headers: { "Cache-Control": "no-cache" } });
-                const data = await res.json();
+                const tunehubPath = path.replace("/api/tunehub/methods", "/v1/methods");
+                const tuneHubRes = await fetch(`https://tunehub.sayqz.com/api${tunehubPath}`, {
+                    headers: {
+                        "X-API-Key": env.TUNEHUB_API_KEY
+                    }
+                });
+                const data = await tuneHubRes.json();
+                return json(data);
+            } catch (e) {
+                return error("TuneHub methods failed: " + e.message, 500);
+            }
+        }
 
-                // Map 800 (expired) to -1
-                if (data.code === 803) {
-                    const cookies = res.headers.get("set-cookie");
-                    return json({
-                        success: true,
-                        status: 2,
-                        message: "登录成功",
-                        cookies: cookies
-                    });
-                } else if (data.code === 801) {
-                    return json({ success: true, status: 0, message: "等待扫码" });
-                } else if (data.code === 802) {
-                    return json({ success: true, status: 1, message: "已扫码，等待确认", nickname: data.nickname });
-                } else {
-                    return json({ success: true, status: -1, message: "二维码已过期或错误" });
+        // === 通用请求代理（用于方法下发） ===
+        if (path === "/api/tunehub/request" && request.method === "POST") {
+            try {
+                const { url: targetUrl, method, headers: reqHeaders, body: reqBody, params } = await request.json();
+
+                if (!targetUrl) {
+                    return error("缺少目标URL");
+                }
+
+                // 构建完整 URL（带参数）
+                let fullUrl = targetUrl;
+                if (params && Object.keys(params).length > 0) {
+                    const urlObj = new URL(targetUrl);
+                    for (const [key, value] of Object.entries(params)) {
+                        urlObj.searchParams.set(key, value);
+                    }
+                    fullUrl = urlObj.toString();
+                }
+
+                const fetchOptions = {
+                    method: method || "GET",
+                    headers: {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                        ...reqHeaders
+                    }
+                };
+
+                if (reqBody && method === "POST") {
+                    fetchOptions.body = typeof reqBody === "string" ? reqBody : JSON.stringify(reqBody);
+                }
+
+                const res = await fetch(fullUrl, fetchOptions);
+                const text = await res.text();
+
+                // 尝试解析为 JSON
+                try {
+                    const jsonData = JSON.parse(text);
+                    return json({ success: true, data: jsonData });
+                } catch {
+                    return json({ success: true, data: text });
                 }
             } catch (e) {
-                return error("Check failed: " + e.message, 500);
+                return error("Request proxy failed: " + e.message, 500);
+            }
+        }
+
+        // === allorigins 代理（用于 QQ 音乐等） ===
+        if (path === "/api/allorigins" && request.method === "GET") {
+            try {
+                const targetUrl = url.searchParams.get("url");
+                if (!targetUrl) return error("缺少目标URL");
+
+                const res = await fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`);
+                const text = await res.text();
+
+                try {
+                    const jsonData = JSON.parse(text);
+                    return json(jsonData);
+                } catch {
+                    return new Response(text, { headers: corsHeaders });
+                }
+            } catch (e) {
+                return error("Allorigins proxy failed: " + e.message, 500);
             }
         }
 
         // 4. SYNC API: Import Data (New)
         if (path === "/api/sync/import" && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
 
             let { platform, id, playlists } = await request.json();
 
@@ -354,20 +297,34 @@ export default {
 
                     if (plId && Array.isArray(pl.tracks) && pl.tracks.length > 0) {
                         importedCount++;
-                        const stmt = env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES (?, ?, 0, ?)");
-
                         // Batch insert
-                        const tracks = pl.tracks;
-                        for (let i = 0; i < tracks.length; i += 10) {
-                            const chunk = tracks.slice(i, i + 10);
-                            const batch = chunk.map(s => {
-                                // Strip temporary/unreliable URL/Lrc fields before saving
-                                const cleanSong = { ...s };
-                                delete cleanSong.url;
-                                if (typeof cleanSong.lrc === 'string' && cleanSong.lrc.startsWith('http')) delete cleanSong.lrc;
-                                return stmt.bind(plId, JSON.stringify(cleanSong), Date.now());
-                            });
-                            await env.DB.batch(batch);
+                        try {
+                            const tracks = pl.tracks;
+                            const now = Date.now();
+                            const MAX_SONGS_PER_STMT = 25; // 100 parameters (D1 safe limit)
+                            const batch = [];
+
+                            for (let i = 0; i < tracks.length; i += MAX_SONGS_PER_STMT) {
+                                const chunk = tracks.slice(i, i + MAX_SONGS_PER_STMT);
+                                const placeholders = chunk.map(() => '(?, ?, 0, ?)').join(',');
+                                const values = [];
+
+                                chunk.forEach((s) => {
+                                    const cleanSong = { ...s };
+                                    delete cleanSong.url;
+                                    if (typeof cleanSong.lrc === 'string' && cleanSong.lrc.startsWith('http')) delete cleanSong.lrc;
+                                    values.push(plId, JSON.stringify(cleanSong), now);
+                                });
+
+                                batch.push(env.DB.prepare(`INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES ${placeholders}`).bind(...values));
+                            }
+
+                            if (batch.length > 0) {
+                                await env.DB.batch(batch);
+                            }
+                        } catch (e) {
+                            console.error("Import songs batch error:", e);
+                            throw new Error("保存歌曲数据失败 (D1 Batch Error)");
                         }
                     }
                 }
@@ -382,7 +339,7 @@ export default {
         // 4. SYNC API: Digital ID Support (Deprecated but kept for backward compatibility if needed)
         if (path === "/api/sync" && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
 
             let { platform, id, link } = await request.json();
 
@@ -407,24 +364,58 @@ export default {
                 const serverCode = serverMap[platform];
                 if (!serverCode) return error("不支持的平台: " + platform);
 
-                // C. Fetch Data from Meting (Public API)
-                // Try api.wuenci.com first, as it often supports type=user
-                let metingUrl = `https://api.wuenci.com/meting/api/?type=user&id=${externalId}&server=${serverCode}`;
+                // C. Fetch Data
+                let songsData = [];
 
-                // Fallback/Alternative logic could be added here if needed
-                // For now we switch to a more reliable instance
+                // Special handling for QQ using official API
+                if (platform === 'qq') {
+                    try {
+                        const qqUrl = `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=${externalId}&format=json`;
+                        const res = await fetch(qqUrl, {
+                            headers: {
+                                "Referer": "https://y.qq.com/",
+                                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+                            }
+                        });
+                        const text = await res.text();
+                        let json;
+                        try {
+                            json = JSON.parse(text);
+                        } catch (e) {
+                            console.error("QQ API Parse Error. Response:", text);
+                            throw new Error("QQ API returned invalid JSON: " + text.substring(0, 100));
+                        }
+                        if (json.cdlist && json.cdlist[0] && json.cdlist[0].songlist) {
+                            songsData = json.cdlist[0].songlist.map(item => ({
+                                id: item.songmid, // Will be prefixed later
+                                name: item.songname,
+                                artist: item.singer ? item.singer.map(s => s.name).join('/') : 'Unknown',
+                                album: item.albumname,
+                                pic: item.albummid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${item.albummid}.jpg` : '',
+                                url: '', // Not needed for DB
+                                lrc: ''
+                            }));
+                        } else {
+                            throw new Error("QQ Playlist not found or empty");
+                        }
+                    } catch (e) {
+                        return error("QQ 导入失败: " + e.message, 500);
+                    }
+                } else {
+                    // Try api.wuenci.com first for others
+                    let metingUrl = `https://api.wuenci.com/meting/api/?type=playlist&id=${externalId}&server=${serverCode}`;
+                    let metingRes = await fetch(metingUrl);
+                    songsData = await metingRes.json().catch(() => null);
 
-                let metingRes = await fetch(metingUrl);
-                let metingData = await metingRes.json().catch(() => null);
-
-                // If wuenci fails, try injahow
-                if (!metingData || metingData.error) {
-                    metingUrl = `https://api.injahow.cn/meting/?type=user&id=${externalId}&server=${serverCode}`;
-                    metingRes = await fetch(metingUrl);
-                    metingData = await metingRes.json().catch(() => null);
+                    // If wuenci fails, try injahow
+                    if (!songsData || songsData.error || !Array.isArray(songsData)) {
+                        metingUrl = `https://api.injahow.cn/meting/?type=playlist&id=${externalId}&server=${serverCode}`;
+                        metingRes = await fetch(metingUrl);
+                        songsData = await metingRes.json().catch(() => null);
+                    }
                 }
 
-                if (!metingData || !Array.isArray(metingData) || metingData.length === 0) {
+                if (!songsData || !Array.isArray(songsData) || songsData.length === 0) {
                     return error("同步失败：未找到歌单或API暂时不可用。请检查ID是否正确，并确保歌单为公开状态。");
                 }
 
@@ -438,82 +429,121 @@ export default {
                     await env.DB.prepare("INSERT INTO connected_accounts (user_id, platform, external_user_id, last_synced_at) VALUES (?, ?, ?, ?)").bind(userId, platform, externalId, Date.now()).run();
                 }
 
-                // 2. Clear Old Synced Playlists for this user & platform
+                // 2. Insert Playlists (Import Logic)
                 const oldPls = await env.DB.prepare("SELECT id FROM playlists WHERE user_id = ? AND platform = ? AND is_sync = 1").bind(userId, platform).all();
-                for (const pl of oldPls.results) {
-                    await env.DB.prepare("DELETE FROM playlist_songs WHERE playlist_id = ?").bind(pl.id).run();
-                    await env.DB.prepare("DELETE FROM playlists WHERE id = ?").bind(pl.id).run();
+                if (oldPls.results.length > 0) {
+                    // Start transaction or prepared statements helper
+                    // Here we just proceed. Optimized to batch or simple loop.
                 }
 
-                // 3. Insert New Playlists
                 let importedCount = 0;
-                // Limit to first 20 playlists to avoid timeout
-                const playlistsToImport = metingData.slice(0, 20);
-
-                // Map platform code to display name
-                const platformNames = {
-                    'netease': '网易',
-                    'qq': 'QQ',
-                    // 'migu': '咪咕', // Migu disabled
-                    'kuwo': '酷我'
-                };
-                const prefix = platformNames[platform] || platform;
+                // Import All Playlists (Unlimited, or reasonable limit. Meting usually returns all ~30-50).
+                const playlistsToImport = metingData;
 
                 for (const pl of playlistsToImport) {
-                    const newName = pl.name;
+                    // Insert Playlist
+                    let plRes = await env.DB.prepare("SELECT id FROM playlists WHERE user_id = ? AND platform = ? AND external_id = ?").bind(userId, platform, pl.id).first();
 
-                    const plRes = await env.DB.prepare(
-                        "INSERT INTO playlists (user_id, name, is_sync, platform, external_id, can_delete, created_at) VALUES (?, ?, 1, ?, ?, 0, ?)"
-                    ).bind(userId, newName, platform, pl.id, Date.now()).run();
+                    // Helper
+                    const getPlatformPrefix = (p) => {
+                        if (p === 'netease') return '网易:';
+                        if (p === 'qq') return 'QQ:';
+                        if (p === 'kuwo') return '酷我:';
+                        return p + ':';
+                    };
+                    const prefixedName = pl.name.startsWith(getPlatformPrefix(platform)) ? pl.name : getPlatformPrefix(platform) + pl.name;
 
-                    if (plRes.success) {
-                        importedCount++;
-                        // Import songs for "Favorites" (usually first one or has specific name)
-                        // Or just import all songs? Importing all might be too heavy for Worker limits (CPU/Time).
-                        // Strategy: Only import the first playlist's songs immediately. Others lazy load (not implemented yet, so we try best effort).
-                        // Let's try to import songs for the first 3 playlists.
-                        if (importedCount <= 3) {
-                            try {
-                                // Use wuenci as primary
-                                const songsUrl = `https://api.wuenci.com/meting/api/?type=playlist&id=${pl.id}&server=${serverCode}`;
-                                let songsRes = await fetch(songsUrl);
-                                let songsData = await songsRes.json().catch(() => null);
+                    if (!plRes) {
+                        const res = await env.DB.prepare("INSERT INTO playlists (user_id, name, is_sync, platform, external_id, created_at) VALUES (?, ?, 1, ?, ?, ?)")
+                            .bind(userId, prefixedName, platform, pl.id, Date.now()).run();
+                        plRes = { id: res.meta.last_row_id };
+                    } else {
+                        // Update name
+                        if (plRes.name !== prefixedName) {
+                            await env.DB.prepare("UPDATE playlists SET name = ? WHERE id = ?").bind(prefixedName, plRes.id).run();
+                        }
+                    }
+                    importedCount++;
 
-                                // Fallback to injahow
-                                if (!songsData || songsData.error) {
-                                    const backupUrl = `https://api.injahow.cn/meting/?type=playlist&id=${pl.id}&server=${serverCode}`;
-                                    songsRes = await fetch(backupUrl);
-                                    songsData = await songsRes.json().catch(() => null);
+                    // Sync Songs for this Playlist
+                    // Check if we need to sync songs? Yes, always for import.
+
+                    let songsData = [];
+                    try {
+                        if (platform === 'qq') {
+                            // Use Verified QQ API
+                            const qqUrl = `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=${pl.id}&format=json`;
+                            const res = await fetch(qqUrl, {
+                                headers: {
+                                    "Referer": "https://y.qq.com/",
+                                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
                                 }
+                            });
+                            const json = await res.json();
+                            if (json.cdlist && json.cdlist[0] && json.cdlist[0].songlist) {
+                                songsData = json.cdlist[0].songlist.map(item => ({
+                                    id: item.songmid,
+                                    name: item.songname,
+                                    artist: item.singer ? item.singer.map(s => s.name).join('/') : 'Unknown',
+                                    album: item.albumname,
+                                    pic: item.albummid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${item.albummid}.jpg` : '',
+                                    url: '',
+                                    lrc: ''
+                                }));
+                            }
+                        } else if (platform === 'netease' || platform === 'kuwo') {
+                            // Use Meting for others (Netease/Kuwo still okay mostly)
+                            // Or use specific API if known. Meting is okay for Netease/Kuwo.
+                            let metingUrl = `https://api.wuenci.com/meting/api/?type=playlist&id=${pl.id}&server=${serverCode}`;
+                            let metingRes = await fetch(metingUrl);
+                            const data = await metingRes.json().catch(() => null);
+                            if (Array.isArray(data)) songsData = data;
+                        }
 
-                                if (Array.isArray(songsData)) {
-                                    const stmt = env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, created_at) VALUES (?, ?, ?)");
-                                    const batch = [];
-                                    for (const s of songsData) {
-                                        const songObj = {
-                                            id: `${platform}-${s.id}`,
-                                            title: s.name,
-                                            artist: s.artist,
-                                            album: s.album,
-                                            cover: s.pic,
-                                            source: platform,
-                                            url: s.url,
-                                            lrc: s.lrc
-                                        };
-                                        // Use decreasing timestamps to preserve order in DESC sort
-                                        batch.push(stmt.bind(plRes.meta.last_row_id, JSON.stringify(songObj), Date.now() - batch.length));
-                                        if (batch.length >= 50) break; // Limit 50 songs per playlist to prevent timeout
-                                    }
-                                    if (batch.length > 0) await env.DB.batch(batch);
-                                }
-                            } catch (e) { console.error("Failed to sync songs for pl", pl.id); }
+                        // ... (rest of logic handles insert)
+                    } catch (e) { console.error("Sync songs error", e); }
+
+                    // 3. Insert All Songs (Single Statement Insert)
+                    const MAX_INSERT_SIZE = 2000;
+                    const now = Date.now();
+
+                    for (let i = 0; i < songsData.length; i += MAX_INSERT_SIZE) {
+                        const chunk = songsData.slice(i, i + MAX_INSERT_SIZE);
+                        const placeholders = chunk.map(() => '(?, ?, 0, ?)').join(',');
+                        const values = [];
+
+                        chunk.forEach((s, idx) => {
+                            const songObj = {
+                                id: `${platform}-${s.id}`,
+                                title: s.name,
+                                artist: s.artist,
+                                album: s.album,
+                                cover: s.pic,
+                                source: platform,
+                                url: s.url,
+                                lrc: s.lrc
+                            };
+                            const absoluteIndex = i + idx;
+                            values.push(plRes.id, JSON.stringify(songObj), now);
+                        });
+
+                        if (values.length > 0) {
+                            await env.DB.prepare(`INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES ${placeholders}`)
+                                .bind(...values)
+                                .run();
                         }
                     }
                 }
 
                 return json({ success: true, count: importedCount, message: "同步成功" });
 
+                return json({ success: true, count: importedCount, message: "同步成功" });
+
             } catch (e) {
+                // Check for JSON parse error which usually means HTML response
+                if (e.message.includes("Unexpected token") || e.message.includes("JSON")) {
+                    return error("第三方接口暂时不可用 (API Error)，请稍后重试", 503);
+                }
                 return error("同步服务出错: " + e.message, 500);
             }
         }
@@ -521,7 +551,7 @@ export default {
         // 5. Playlists: List (Supports folder structure view)
         if (path === "/api/playlists" && request.method === "GET") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
 
             const { results } = await env.DB.prepare(
                 "SELECT * FROM playlists WHERE user_id = ? ORDER BY created_at DESC"
@@ -529,11 +559,9 @@ export default {
 
             const playlists = [];
             for (const pl of results) {
-                // Fetch songs count or preview?
-                // Let's fetch songs for local playlists. For synced, we might rely on lazy load or stored.
-                // For now, fetch all stored songs.
+                // Fetch ALL songs for local/synced playlists (Order by ID ASC to follow insertion order)
                 const { results: songs } = await env.DB.prepare(
-                    "SELECT id, song_json FROM playlist_songs WHERE playlist_id = ? ORDER BY created_at DESC"
+                    "SELECT id, song_json FROM playlist_songs WHERE playlist_id = ? ORDER BY id ASC"
                 ).bind(pl.id).all();
 
                 playlists.push({
@@ -557,9 +585,9 @@ export default {
 
         if (path === "/api/playlists/sync" && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { platform, externalId, name, songs } = await request.json();
-            if (!platform || !externalId || !Array.isArray(songs)) return error("Invalid data");
+            if (!platform || !externalId || !Array.isArray(songs)) return error("数据格式无效");
 
             // 1. Check if playlist exists
             let pl = await env.DB.prepare("SELECT * FROM playlists WHERE user_id = ? AND platform = ? AND external_id = ?").bind(userId, platform, externalId).first();
@@ -591,7 +619,7 @@ export default {
 
             if (!pl) {
                 const prefixedName = getPlatformPrefix(platform) + getCleanedName(name);
-                const res = await env.DB.prepare("INSERT INTO playlists (user_id, name, is_sync, platform, external_id, created_at) VALUES (?, ?, 1, ?, ?, ?)")
+                const res = await env.DB.prepare("INSERT INTO playlists (user_id, name, is_sync, platform, external_id, created_at, can_delete) VALUES (?, ?, 1, ?, ?, ?, 1)")
                     .bind(userId, prefixedName, platform, externalId, Date.now()).run();
                 playlistId = res.meta.last_row_id;
             } else {
@@ -603,61 +631,67 @@ export default {
                 }
             }
 
-            // 2. Incremental Sync
-            const { results: dbSongs } = await env.DB.prepare("SELECT id, song_json, is_local_add FROM playlist_songs WHERE playlist_id = ?").bind(playlistId).all();
-            const dbMap = new Map();
-            dbSongs.forEach(s => {
-                const song = JSON.parse(s.song_json);
-                dbMap.set(song.id, s);
-            });
+            // 2. Full Replace Strategy using D1 Batch (Atomic)
+            try {
+                const now = Date.now();
+                const MAX_SONGS_PER_STMT = 25;
+                const batchStatements = [];
 
-            const platformIds = new Set(songs.map(s => s.id));
-            const batch = [];
+                // Add Delete Statement to batch
+                batchStatements.push(env.DB.prepare("DELETE FROM playlist_songs WHERE playlist_id = ? AND is_local_add = 0").bind(playlistId));
 
-            // Add new songs from platform
-            for (const s of songs) {
-                if (!dbMap.has(s.id)) {
-                    delete s.url;
-                    if (typeof s.lrc === 'string' && s.lrc.startsWith('http')) delete s.lrc;
-                    batch.push(env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES (?, ?, 0, ?)").bind(playlistId, JSON.stringify(s), Date.now() - batch.length));
+                // Prepare Insert Statements
+                let importedCount = 0;
+                for (let i = 0; i < songs.length; i += MAX_SONGS_PER_STMT) {
+                    const chunk = songs.slice(i, i + MAX_SONGS_PER_STMT);
+                    const placeholders = chunk.map(() => '(?, ?, 0, ?)').join(',');
+                    const values = [];
+
+                    chunk.forEach((s) => {
+                        const cleanSong = { ...s };
+                        delete cleanSong.url;
+                        if (typeof cleanSong.lrc === 'string' && cleanSong.lrc.startsWith('http')) delete cleanSong.lrc;
+
+                        values.push(playlistId, JSON.stringify(cleanSong), now);
+                        importedCount++;
+                    });
+
+                    batchStatements.push(env.DB.prepare(`INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES ${placeholders}`).bind(...values));
                 }
-            }
 
-            // Delete removed platform songs (not manual ones)
-            for (const [id, dbSong] of dbMap.entries()) {
-                if (!platformIds.has(id) && dbSong.is_local_add === 0) {
-                    batch.push(env.DB.prepare("DELETE FROM playlist_songs WHERE id = ?").bind(dbSong.id));
+                // Execute ALL in a single transaction
+                if (batchStatements.length > 0) {
+                    await env.DB.batch(batchStatements);
                 }
-            }
 
-            if (batch.length > 0) {
-                await env.DB.batch(batch);
+                return json({ success: true, count: importedCount, message: "同步完成 (全量覆盖)" });
+            } catch (e) {
+                console.error("Sync batch failed:", e);
+                return error("同步数据库操作失败: " + e.message, 500);
             }
-
-            return json({ success: true, count: batch.length });
         }
 
         // 6. Playlists: Create/Delete/Update/Add Songs (Standard CRUD)
         if (path === "/api/playlists" && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { name } = await request.json();
             const res = await env.DB.prepare("INSERT INTO playlists (user_id, name, created_at) VALUES (?, ?, ?)")
                 .bind(userId, name, Date.now()).run();
-            return json({ id: res.meta.last_row_id, name, tracks: [] });
+            return json({ success: true, id: res.meta.last_row_id, name });
         }
 
         // Add Song to Playlist
         const addSongMatch = path.match(/^\/api\/playlists\/(\d+)\/songs$/);
         if (addSongMatch && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const plId = addSongMatch[1];
             const song = await request.json();
 
             // Verify playlist ownership
             const pl = await env.DB.prepare("SELECT * FROM playlists WHERE id = ?").bind(plId).first();
-            if (!pl || pl.user_id !== userId) return error("Forbidden", 403);
+            if (!pl || pl.user_id !== userId) return error("无权限", 403);
 
             // Strip sensitive/temporary fields
             delete song.url;
@@ -665,63 +699,72 @@ export default {
 
             // Check duplicate
             const exists = await env.DB.prepare("SELECT id FROM playlist_songs WHERE playlist_id = ? AND json_extract(song_json, '$.id') = ?").bind(plId, song.id).first();
-            if (exists) return error("Song already exists in playlist");
+            if (exists) return error("歌曲已存在于歌单中");
 
             // INSERT with is_local_add = 1
             const res = await env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES (?, ?, 1, ?)").bind(plId, JSON.stringify(song), Date.now()).run();
-            return json({ success: true, uid: res.meta.last_row_id });
+            return json({ success: true, id: res.meta.last_row_id });
         }
 
         // Batch Add Songs to Playlist
         const batchAddSongsMatch = path.match(/^\/api\/playlists\/batch-songs$/);
         if (batchAddSongsMatch && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { playlistId, songs } = await request.json();
-            if (!playlistId || !Array.isArray(songs)) return error("Invalid data");
+            if (!playlistId || !Array.isArray(songs)) return error("数据格式无效");
 
             // Verify playlist ownership
             const pl = await env.DB.prepare("SELECT * FROM playlists WHERE id = ?").bind(playlistId).first();
-            if (!pl || pl.user_id !== userId) return error("Forbidden", 403);
+            if (!pl || pl.user_id !== userId) return error("无权限", 403);
 
-            // Fetch existing song IDs in this playlist
-            const { results: existingSongs } = await env.DB.prepare("SELECT json_extract(song_json, '$.id') as songId FROM playlist_songs WHERE playlist_id = ?").bind(playlistId).all();
-            const existingIds = new Set(existingSongs.map(r => r.songId));
-
+            // Prepare batch insert
             const stmt = env.DB.prepare("INSERT INTO playlist_songs (playlist_id, song_json, is_local_add, created_at) VALUES (?, ?, 1, ?)");
-            const batch = [];
-            for (const song of songs) {
-                if (!existingIds.has(song.id)) {
-                    // Strip sensitive/temporary fields
-                    delete song.url;
-                    if (typeof song.lrc === 'string' && song.lrc.startsWith('http')) delete song.lrc;
 
-                    batch.push(stmt.bind(playlistId, JSON.stringify(song), Date.now()));
+            // Check existing songs to avoid duplicates in batch
+            // (For large batches, we might skip checking all or do a bulk check. Here simplified.)
+            const { results: existing } = await env.DB.prepare("SELECT json_extract(song_json, '$.id') as sid FROM playlist_songs WHERE playlist_id = ?").bind(playlistId).all();
+            const existingIds = new Set(existing.map(r => r.sid));
+
+            let addedCount = 0;
+            const CHUNK_SIZE = 20;
+
+            for (let i = 0; i < songs.length; i += CHUNK_SIZE) {
+                const chunk = songs.slice(i, i + CHUNK_SIZE);
+                const currentBatch = [];
+                for (const s of chunk) {
+                    if (!existingIds.has(s.id)) {
+                        // Strip sensitive/temporary fields
+                        const cleanSong = { ...s };
+                        delete cleanSong.url;
+                        if (typeof cleanSong.lrc === 'string' && cleanSong.lrc.startsWith('http')) delete cleanSong.lrc;
+
+                        currentBatch.push(stmt.bind(playlistId, JSON.stringify(cleanSong), Date.now() - (i + currentBatch.length)));
+                        addedCount++;
+                        existingIds.add(s.id); // Prevent dups within same batch
+                    }
                 }
+                if (currentBatch.length > 0) await env.DB.batch(currentBatch);
             }
 
-            if (batch.length > 0) {
-                await env.DB.batch(batch);
-            }
-            return json({ success: true, count: batch.length });
+            return json({ success: true, count: addedCount });
         }
 
         // remove song from playlist
         const removeSongMatch = path.match(/^\/api\/playlists\/(\d+)\/songs$/);
         if (removeSongMatch && request.method === "DELETE") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const plId = removeSongMatch[1];
             const { uid } = await request.json(); // song uid (or id)
 
             // Check permission
             const pl = await env.DB.prepare("SELECT * FROM playlists WHERE id = ?").bind(plId).first();
-            if (!pl || pl.user_id !== userId) return error("Forbidden", 403);
+            if (!pl || pl.user_id !== userId) return error("无权限", 403);
 
             // Delete by row ID (id column)
             // Frontend sends the database row ID as 'uid'
             await env.DB.prepare("DELETE FROM playlist_songs WHERE playlist_id = ? AND id = ?").bind(plId, uid).run();
-
             return json({ success: true });
         }
 
@@ -729,12 +772,12 @@ export default {
         const deletePlMatch = path.match(/^\/api\/playlists\/(\d+)$/);
         if (deletePlMatch && request.method === "DELETE") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const plId = deletePlMatch[1];
             // Check permission
             const pl = await env.DB.prepare("SELECT * FROM playlists WHERE id = ?").bind(plId).first();
-            if (!pl || pl.user_id !== userId) return error("Forbidden", 403);
-            // if (pl.can_delete === 0) return error("Cannot delete synced playlist", 403); // REMOVED RESTRICTION
+            if (!pl || pl.user_id !== userId) return error("无权限", 403);
+            // if (pl.can_delete === 0) return error("无法删除同步歌单", 403); // REMOVED RESTRICTION
 
             await env.DB.prepare("DELETE FROM playlist_songs WHERE playlist_id = ?").bind(plId).run();
             await env.DB.prepare("DELETE FROM playlists WHERE id = ?").bind(plId).run();
@@ -745,14 +788,14 @@ export default {
         const renamePlMatch = path.match(/^\/api\/playlists\/(\d+)$/);
         if (renamePlMatch && request.method === "PUT") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const plId = renamePlMatch[1];
             const { name } = await request.json();
-            if (!name) return error("Name is required");
+            if (!name) return error("请输入名称");
 
             // Check permission
             const pl = await env.DB.prepare("SELECT * FROM playlists WHERE id = ?").bind(plId).first();
-            if (!pl || pl.user_id !== userId) return error("Forbidden", 403);
+            if (!pl || pl.user_id !== userId) return error("无权限", 403);
 
             await env.DB.prepare("UPDATE playlists SET name = ? WHERE id = ?").bind(name, plId).run();
             return json({ success: true });
@@ -762,13 +805,13 @@ export default {
         // 7. Favorites: CRUD
         if (path === "/api/favorites" && request.method === "GET") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { results } = await env.DB.prepare("SELECT song_json FROM favorites WHERE user_id = ? ORDER BY created_at DESC").bind(userId).all();
             return json(results.map(r => JSON.parse(r.song_json)));
         }
         if (path === "/api/favorites" && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const song = await request.json();
             // Strip sensitive/temporary fields
             delete song.url;
@@ -776,14 +819,14 @@ export default {
 
             // Check dupe
             const exists = await env.DB.prepare("SELECT id FROM favorites WHERE user_id = ? AND json_extract(song_json, '$.id') = ?").bind(userId, song.id).first();
-            if (!exists) {
-                await env.DB.prepare("INSERT INTO favorites (user_id, song_json, created_at) VALUES (?, ?, ?)").bind(userId, JSON.stringify(song), Date.now()).run();
-            }
+            if (exists) return json({ success: true, message: "Already favorite" });
+
+            await env.DB.prepare("INSERT INTO favorites (user_id, song_json, created_at) VALUES (?, ?, ?)").bind(userId, JSON.stringify(song), Date.now()).run();
             return json({ success: true });
         }
         if (path === "/api/favorites" && request.method === "DELETE") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { id } = await request.json(); // song id
             await env.DB.prepare("DELETE FROM favorites WHERE user_id = ? AND json_extract(song_json, '$.id') = ?").bind(userId, id).run();
             return json({ success: true });
@@ -792,37 +835,44 @@ export default {
         // Batch Add Favorites
         if (path === "/api/favorites/batch" && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { songs } = await request.json();
-            if (!Array.isArray(songs)) return error("Invalid data");
+            if (!Array.isArray(songs)) return error("数据格式无效");
 
             const { results: existingFavs } = await env.DB.prepare("SELECT json_extract(song_json, '$.id') as songId FROM favorites WHERE user_id = ?").bind(userId).all();
             const existingIds = new Set(existingFavs.map(r => r.songId));
 
             const stmt = env.DB.prepare("INSERT INTO favorites (user_id, song_json, created_at) VALUES (?, ?, ?)");
-            const batch = [];
-            for (const song of songs) {
-                if (!existingIds.has(song.id)) {
-                    // Strip sensitive/temporary fields
-                    delete song.url;
-                    if (typeof song.lrc === 'string' && song.lrc.startsWith('http')) delete song.lrc;
 
-                    batch.push(stmt.bind(userId, JSON.stringify(song), Date.now()));
+            const CHUNK_SIZE = 20;
+            let addedCount = 0;
+            for (let i = 0; i < songs.length; i += CHUNK_SIZE) {
+                const chunk = songs.slice(i, i + CHUNK_SIZE);
+                const currentBatch = [];
+                for (const s of chunk) {
+                    if (!existingIds.has(s.id)) {
+                        // Strip fields
+                        const clean = { ...s };
+                        delete clean.url;
+                        if (typeof clean.lrc === 'string' && clean.lrc.startsWith('http')) delete clean.lrc;
+
+                        currentBatch.push(stmt.bind(userId, JSON.stringify(clean), Date.now() - (i + currentBatch.length)));
+                        addedCount++;
+                        existingIds.add(s.id);
+                    }
                 }
+                if (currentBatch.length > 0) await env.DB.batch(currentBatch);
             }
 
-            if (batch.length > 0) {
-                await env.DB.batch(batch);
-            }
-            return json({ success: true, count: batch.length });
+            return json({ success: true, count: addedCount });
         }
 
         // Batch Delete Favorites
         if (path === "/api/favorites/batch" && request.method === "DELETE") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { ids } = await request.json();
-            if (!Array.isArray(ids)) return error("Invalid data");
+            if (!Array.isArray(ids)) return error("数据格式无效");
 
             // Delete all matching songs (silently ignore non-existent)
             for (const id of ids) {
@@ -835,14 +885,14 @@ export default {
         const batchDeleteSongsMatch = path.match(/^\/api\/playlists\/(\d+)\/songs\/batch$/);
         if (batchDeleteSongsMatch && request.method === "DELETE") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const plId = batchDeleteSongsMatch[1];
             const { uids } = await request.json();
-            if (!Array.isArray(uids)) return error("Invalid data");
+            if (!Array.isArray(uids)) return error("数据格式无效");
 
             // Verify playlist ownership
             const pl = await env.DB.prepare("SELECT * FROM playlists WHERE id = ?").bind(plId).first();
-            if (!pl || pl.user_id !== userId) return error("Forbidden", 403);
+            if (!pl || pl.user_id !== userId) return error("无权限", 403);
 
             // Delete all matching songs by uid
             for (const uid of uids) {
@@ -851,10 +901,10 @@ export default {
             return json({ success: true, count: uids.length });
         }
 
-        // 8. Play History
+        // 8. Play History (With strict limit 100)
         if (path === "/api/history" && request.method === "GET") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { results } = await env.DB.prepare("SELECT id, song_json FROM play_history WHERE user_id = ? ORDER BY played_at DESC LIMIT 100").bind(userId).all();
             return json(results.map(r => {
                 const song = JSON.parse(r.song_json);
@@ -864,22 +914,26 @@ export default {
         }
         if (path === "/api/history" && request.method === "POST") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const song = await request.json();
             // Strip sensitive/temporary fields
             delete song.url;
             if (typeof song.lrc === 'string' && song.lrc.startsWith('http')) delete song.lrc;
 
             await env.DB.prepare("INSERT INTO play_history (user_id, song_json, played_at) VALUES (?, ?, ?)").bind(userId, JSON.stringify(song), Date.now()).run();
+
+            // Cleanup: Keep only recent 100
+            await env.DB.prepare("DELETE FROM play_history WHERE user_id = ? AND id NOT IN (SELECT id FROM play_history WHERE user_id = ? ORDER BY played_at DESC LIMIT 100)").bind(userId, userId).run();
+
             return json({ success: true });
         }
 
         // Batch Delete History
         if (path === "/api/history/batch" && request.method === "DELETE") {
             const userId = getUserId();
-            if (!userId) return error("Unauthorized", 401);
+            if (!userId) return error("未登录", 401);
             const { ids } = await request.json();
-            if (!Array.isArray(ids)) return error("Invalid data");
+            if (!Array.isArray(ids)) return error("数据格式无效");
 
             // Delete all matching history by song id
             for (const id of ids) {
@@ -892,7 +946,7 @@ export default {
         if (path === "/api/proxy" && request.method === "GET") {
             try {
                 const targetUrl = url.searchParams.get("url");
-                if (!targetUrl) return error("Missing target url");
+                if (!targetUrl) return error("缺少目标URL");
 
                 // Use Cloudflare Cache API for better performance
                 const cache = caches.default;
@@ -976,3 +1030,4 @@ export default {
         return error("Not Found", 404);
     },
 };
+

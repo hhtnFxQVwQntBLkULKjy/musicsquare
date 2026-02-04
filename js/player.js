@@ -250,7 +250,13 @@ class MusicPlayer {
 
         this.audio.pause();
         this.audio.currentTime = 0;
-        this.audio.src = track.url;
+
+        // Process URL through proxy for sources that need it (especially Kuwo with SSL issues)
+        let audioUrl = track.url;
+        if (track.source === 'kuwo' && audioUrl) {
+            audioUrl = MusicAPI.getProxyUrl(audioUrl, 'kuwo');
+        }
+        this.audio.src = audioUrl;
         this.lyrics = [];
         UI.setLyrics([]);
 

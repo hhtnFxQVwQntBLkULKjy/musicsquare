@@ -56,6 +56,14 @@ This backend handles user authentication, playlists, and favorites using Cloudfl
     ```
     Your API will be available at `https://yunduanyingyue.<your-subdomain>.workers.dev`.
 
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `TUNEHUB_API_KEY` | Yes | API Key from [TuneHub](https://tunehub.sayqz.com/) for song parsing |
+
+Configure in Cloudflare Dashboard: Worker Settings -> Variables -> Environment Variables
+
 ## API Endpoints
 
 *   **Auth**
@@ -72,3 +80,8 @@ This backend handles user authentication, playlists, and favorites using Cloudfl
     *   `GET /api/favorites`
     *   `POST /api/favorites` - { ...song_object }
     *   `DELETE /api/favorites` - { uid }
+*   **TuneHub Proxy** (New)
+    *   `POST /api/tunehub/parse` - { platform, ids, quality } -> Song URL & lyrics
+    *   `GET /api/tunehub/methods/*` - Proxy to TuneHub methods API
+    *   `POST /api/tunehub/request` - { url, method, headers, body, params } -> Generic request proxy
+    *   `GET /api/allorigins?url=...` - Proxy via allorigins.win (for QQ Music)

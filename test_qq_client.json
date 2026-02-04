@@ -1,0 +1,8 @@
+{
+    "url": "https://c.y.qq.com/soso/fcgi-bin/client_search_cp?w=%E5%91%A8%E6%9D%B0%E4%BC%A6&p=1&n=10&format=json&new_json=1&cr=1",
+    "method": "GET",
+    "headers": {
+        "Referer": "https://y.qq.com/",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+}

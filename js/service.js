@@ -3,7 +3,12 @@
 
 // 后端配置: 'cloudflare' (默认) 或 'java' (MySQL)
 const BACKEND_TYPE = 'cloudflare';
-const API_BASE = BACKEND_TYPE === 'java' ? 'http://localhost:8080/api' : 'https://api.yexin.de5.net/api';
+const API_BASE = BACKEND_TYPE === 'java' ? 'http://localhost:8080/api' : 'https://yunduanyingyue.tmichi1001.workers.dev/api';
+
+// 初始化 MusicAPI 的 Worker 端点
+if (typeof MusicAPI !== 'undefined') {
+    MusicAPI.init(API_BASE);
+}
 
 const AuthService = {
     get currentUser() {
@@ -50,6 +55,38 @@ const AuthService = {
         localStorage.removeItem('currentUser');
         // Clear data cache
         DataService.clearCache();
+    },
+
+    async checkUserExists(username) {
+        try {
+            const res = await fetch(`${API_BASE}/auth/check-user`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '验证失败');
+            return data.exists;
+        } catch (e) {
+            console.error('Check User Error:', e);
+            throw e;
+        }
+    },
+
+    async resetPassword(username, newPassword) {
+        try {
+            const res = await fetch(`${API_BASE}/auth/reset-password`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, newPassword })
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || '重置密码失败');
+            return data;
+        } catch (e) {
+            console.error('Reset Password Error:', e);
+            throw e;
+        }
     }
 };
 

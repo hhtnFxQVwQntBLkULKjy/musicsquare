@@ -36,6 +36,8 @@
             </div>
             <button class="btn-primary" id="login-btn">登录</button>
             <div class="footer-links">
+                <a id="go-forgot-password" style="color: #888;">忘记密码?</a>
+                <span style="margin: 0 8px; color: #ddd;">|</span>
                 还没有账号? <a id="go-register">立即注册</a>
             </div>
         </div>
@@ -62,6 +64,36 @@
             <button class="btn-primary" id="register-btn">注册</button>
             <div class="footer-links">
                 已有账号? <a id="go-login">立即登录</a>
+            </div>
+        </div>
+
+        <!-- Forgot Password Form -->
+        <div id="forgot-password-form" style="display: none;">
+            <div class="form-group">
+                <div class="input-wrapper">
+                    <span class="input-icon">👤</span>
+                    <input type="text" id="forgot-username" placeholder="请输入用户名">
+                </div>
+            </div>
+            <button class="btn-primary btn-secondary" id="check-user-btn">验证账号</button>
+
+            <div id="reset-password-section" style="display: none; margin-top: 20px;">
+                <div class="form-group">
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔐</span>
+                        <input type="password" id="new-password" placeholder="输入新密码">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="input-wrapper">
+                        <span class="input-icon">🔐</span>
+                        <input type="password" id="confirm-new-password" placeholder="确认新密码">
+                    </div>
+                </div>
+                <button class="btn-primary" id="reset-password-btn">重置密码</button>
+            </div>
+            <div class="footer-links">
+                <a id="go-login-from-forgot">返回登录</a>
             </div>
         </div>
     </div>
