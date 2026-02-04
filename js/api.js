@@ -36,6 +36,10 @@ const MusicAPI = {
         if (!url) return url;
         const PROXY_BASE = `${this.endpoints.worker}/proxy?url=`;
 
+        if (url.startsWith(PROXY_BASE) ||
+            url.includes('localhost') ||
+            url.includes('127.0.0.1')) return url;
+
         // Force HTTPS for NetEase and QQ (they have valid certs)
         if (url.startsWith('http://') && (url.includes('music.126.net') || url.includes('qq.com'))) {
             url = url.replace('http://', 'https://');
@@ -45,10 +49,6 @@ const MusicAPI = {
         if (url.includes('kuwo.cn') && url.startsWith('https://')) {
             url = url.replace('https://', 'http://');
         }
-
-        if (url.startsWith(PROXY_BASE) ||
-            url.includes('localhost') ||
-            url.includes('127.0.0.1')) return url;
 
         // HTTPS netease CDN works without proxy
         if (url.includes('music.126.net') && url.startsWith('https://')) {
