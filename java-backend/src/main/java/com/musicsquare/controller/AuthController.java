@@ -21,13 +21,13 @@ public class AuthController {
     @PostMapping("/auth/register")
     public ApiResponse register(@RequestBody AuthRequest request) {
         if (request.getUsername() == null || request.getPassword() == null) {
-            return ApiResponse.error("Missing username or password");
+            return ApiResponse.error("用户名或密码不能为空");
         }
         Optional<User> user = authService.register(request.getUsername(), request.getPassword());
         if (user.isPresent()) {
-            return ApiResponse.success("User created", null);
+            return ApiResponse.success("用户创建成功", null);
         }
-        return ApiResponse.error("Username already exists");
+        return ApiResponse.error("用户名已存在");
     }
 
     @PostMapping("/auth/login")
@@ -42,7 +42,7 @@ public class AuthController {
                             "username", u.getUsername(),
                             "avatar", u.getAvatar())));
         }
-        return ApiResponse.error("Invalid credentials");
+        return ApiResponse.error("用户名或密码错误");
     }
 
     @PostMapping("/user/profile")
@@ -56,5 +56,29 @@ public class AuthController {
 
         authService.updateProfile(userId, username, avatar);
         return ApiResponse.success(null);
+    }
+
+    @PostMapping("/auth/check-user")
+    public ApiResponse checkUser(@RequestBody Map<String, String> body) {
+        String username = body.get("username");
+        if (username == null || username.isEmpty()) {
+            return ApiResponse.error("用户名不能为空");
+        }
+        boolean exists = authService.checkUserExists(username);
+        return ApiResponse.success(Map.of("exists", exists));
+    }
+
+    @PostMapping("/auth/reset-password")
+    public ApiResponse resetPassword(@RequestBody Map<String, String> body) {
+        String username = body.get("username");
+        String newPassword = body.get("newPassword");
+        if (username == null || newPassword == null) {
+            return ApiResponse.error("用户名和新密码不能为空");
+        }
+        boolean success = authService.resetPassword(username, newPassword);
+        if (success) {
+            return ApiResponse.success("密码重置成功");
+        }
+        return ApiResponse.error("用户不存在");
     }
 }

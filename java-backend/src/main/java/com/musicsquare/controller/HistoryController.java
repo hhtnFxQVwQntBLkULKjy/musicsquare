@@ -52,4 +52,20 @@ public class HistoryController {
             return ApiResponse.error(e.getMessage());
         }
     }
+
+    @DeleteMapping("/history/batch")
+    public ApiResponse batchDeleteHistory(
+            @RequestHeader("Authorization") String auth,
+            @RequestBody Map<String, Object> body) {
+        Long userId = Long.parseLong(auth.split(" ")[1]);
+        try {
+            List<String> ids = (List<String>) body.get("ids");
+            if (ids != null) {
+                historyService.batchDeleteHistory(userId, ids);
+            }
+            return ApiResponse.success(null);
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
 }

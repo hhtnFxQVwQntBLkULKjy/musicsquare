@@ -78,60 +78,27 @@ README 中的默认 API 代理地址仅供演示，**严禁滥用**。若发现�
 
 ## 🚀 部署指南
 
-### 1. 后端部署 A: Cloudflare Workers (推荐, 免费)
+本项目支持两种部署方式：**Cloudflare Workers** (轻量/免费) 和 **Java 后端** (功能完整/自建)。
 
-本项目后端基于 Cloudflare Workers + D1 数据库，**建议使用自定义域名**以规避 `workers.dev` 的跨域及额度限制。
+👉 **请务必阅读详细的 [部署手册 (DEPLOY.md)](DEPLOY.md)**
 
-#### 第一步：创建 D1 数据库
-1. 登录 [Cloudflare 控制台](https://dash.cloudflare.com/)。
-2. 导航至 `Workers & Pages` -> `D1` -> `Create Database`。
-3. 数据库名称建议填写为 `musicsquare-db`。
-4. 在 `Console` 面板中，执行 `backend/schema.sql` 中的 SQL 脚本以初始化数据表。
+### 简要步骤
 
-#### 第二步：创建并配置 Worker
-1. 导航至 `Workers & Pages` -> `Create application` -> `Create Worker`。
-2. 命名后点击 `Deploy`，进入编辑器。
-3. 将 `backend/worker.js` 的内容完整覆盖到代码编辑器中。
-4. 进入 Worker 的 `Settings` -> `Variables` -> `D1 database bindings`：
-   - **Variable name**: 必须填写为 `DB`
-   - **D1 database**: 选择刚才创建的 `musicsquare-db`。
+1.  **选择并部署后端**：
+    *   **Cloudflare Workers**: 适合个人使用，无需服务器。
+    *   **Java (Spring Boot)**: 适合云服务器部署，使用 MySQL 存储。
 
-#### 第三步：配置自定义域名 (推荐)
-1. 在 Worker 的详情页，选择 `Triggers` -> `Custom Domains` -> `Add Custom Domain`。
-2. 填写一个在你 Cloudflare 账号下的二级域名（例如 `api.yourdomain.com`）。
-3. Cloudflare 会自动为你创建所需的 DNS 解析。
+2.  **修改前端配置** (⚠️ **必须执行**)：
+    无论选择哪种后端，都必须修改 `js/service.js` 文件：
+    ```javascript
+    // 找到 API_BASE 配置项，将其修改为您部署的后端地址
+    const API_BASE = 'https://您的后端地址/api';
+    ```
 
-#### 第四步：配置 TuneHub API Key
-1. 访问 [TuneHub API](https://tunehub.sayqz.com/) 获取你的 API Key。
-2. 在 Worker 的 `Settings` -> `Variables` -> `Environment Variables` 中添加：
-   - **Variable name**: `TUNEHUB_API_KEY`
-   - **Value**: 你的 TuneHub API Key
+3.  **部署前端**：
+    *   推荐使用 **GitHub Pages** 或 Vercel 托管前端静态文件。
 
-> [!IMPORTANT]
-> TuneHub API Key 必须配置在后端环境变量中，不能暴露在前端代码中。
-
-### 2. 前端部署 (GitHub Pages)
-
-1. **Fork 本项目** 到个人账号。
-2. **修改 API 配置**：
-   - 打开 `js/service.js` 文件。
-   - 找到 `const API_BASE = '...'` 将其修改为你刚部署好的 Worker 地址（例如 `https://api.yourdomain.com/api`）。
-   - 确保 `BACKEND_TYPE` 设为 `'cloudflare'`。
-3. **开启 Pages**：
-   - 在 GitHub 仓库设置 `Settings` -> `Pages`。
-   - `Build and deployment` 选择 `main` 分支根目录。
-   - 访问 `https://[用户名].github.io/musicsquare` 即可使用。
-
-### 3. 后端部署 B: 云服务器 (Java + MySQL)
-
-如果你想在自己的服务器（如腾讯云、阿里云等）上部署，请参考详细的：
-👉 **[云服务器部署指南 (DEPLOY.md)](DEPLOY.md)**
-
-主要步骤包括：
-1. 安装 JDK 17 和 MySQL。
-2. 运行 `backend/mysql_schema.sql` 初始化数据库。
-3. 打包并运行 `java-backend` 项目。
-4. 修改前端 `js/service.js` 中的 `BACKEND_TYPE` 为 `'java'` 并指向你的服务器 IP。
+> 详细的服务器环境配置、Nginx 设置及数据库初始化脚本，请查阅 [DEPLOY.md](DEPLOY.md)。
 
 ---
 

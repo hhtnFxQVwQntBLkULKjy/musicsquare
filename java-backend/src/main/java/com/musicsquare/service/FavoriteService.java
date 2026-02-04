@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -33,5 +34,20 @@ public class FavoriteService {
     @Transactional
     public void removeFavorite(Long userId, String songId) {
         favoriteRepository.deleteByUserIdAndSongId(userId, songId);
+    }
+
+    @Transactional
+    public void addBatchFavorites(Long userId, List<Map<String, String>> songs) {
+        // songs is list of {json, id}
+        for (Map<String, String> item : songs) {
+            addFavorite(userId, item.get("json"), item.get("id"));
+        }
+    }
+
+    @Transactional
+    public void removeBatchFavorites(Long userId, List<String> songIds) {
+        for (String sid : songIds) {
+            favoriteRepository.deleteByUserIdAndSongId(userId, sid);
+        }
     }
 }

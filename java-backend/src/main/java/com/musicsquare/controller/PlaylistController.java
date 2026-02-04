@@ -114,4 +114,69 @@ public class PlaylistController {
         playlistService.renamePlaylist(userId, playlistId, body.get("name"));
         return ApiResponse.success(null);
     }
+    @DeleteMapping("/playlists/{id}/songs/batch")
+    public ApiResponse removeBatchSongs(
+            @PathVariable("id") Long playlistId,
+            @RequestHeader("Authorization") String auth,
+            @RequestBody Map<String, Object> body) {
+        List<?> uidsRaw = (List<?>) body.get("uids");
+        List<Long> uids = new ArrayList<>();
+        if (uidsRaw != null) {
+            for (Object obj : uidsRaw) {
+                if (obj instanceof Number) {
+                    uids.add(((Number) obj).longValue());
+                } else if (obj instanceof String) {
+                    try {
+                        uids.add(Long.parseLong((String) obj));
+                    } catch (NumberFormatException ignored) {}
+                }
+            }
+        }
+        playlistService.removeBatchSongsFromPlaylist(playlistId, uids);
+        return ApiResponse.success(null);
+    }
+
+    @PostMapping("/playlists/batch-songs")
+    public ApiResponse addBatchSongs(
+            @RequestHeader("Authorization") String auth,
+            @RequestBody Map<String, Object> body) {
+        try {
+            Long playlistId = Long.parseLong(body.get("playlistId").toString());
+            List<Object> songs = (List<Object>) body.get("songs");
+            List<String> jsons = new ArrayList<>();
+            for (Object s : songs) {
+                jsons.add(objectMapper.writeValueAsString(s));
+            }
+            int count = playlistService.addBatchSongsToPlaylist(playlistId, jsons);
+            return ApiResponse.success(Map.of("count", count));
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @PostMapping("/playlists/sync")
+    public ApiResponse syncPlaylist(
+            @RequestHeader("Authorization") String auth,
+            @RequestBody Map<String, Object> body) {
+        try {
+            Long userId = Long.parseLong(auth.split(" ")[1]);
+            String platform = (String) body.get("platform");
+            String externalId = (String) body.get("externalId");
+            String name = (String) body.get("name");
+            List<Object> songs = (List<Object>) body.get("songs");
+            
+            List<String> jsons = new ArrayList<>();
+            if (songs != null) {
+                for (Object s : songs) {
+                    jsons.add(objectMapper.writeValueAsString(s));
+                }
+            }
+
+            playlistService.syncPlaylist(userId, platform, externalId, name, jsons);
+            return ApiResponse.success(Map.of("count", jsons.size()));
+        } catch (Exception e) {
+             e.printStackTrace();
+            return ApiResponse.error(e.getMessage());
+        }
+    }
 }

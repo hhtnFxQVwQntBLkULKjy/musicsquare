@@ -10,4 +10,7 @@ public interface PlaylistSongRepository extends JpaRepository<PlaylistSong, Long
     void deleteByPlaylistId(Long playlistId);
 
     void deleteByPlaylistIdAndId(Long playlistId, Long id);
+
+    void deleteByPlaylistIdAndIsLocalAdd(Long playlistId, Integer isLocalAdd);
 }
+

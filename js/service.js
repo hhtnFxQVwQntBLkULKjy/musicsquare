@@ -1,9 +1,16 @@
 
 
 
-// 后端配置: 'cloudflare' (默认) 或 'java' (MySQL)
-const BACKEND_TYPE = 'cloudflare';
-const API_BASE = BACKEND_TYPE === 'java' ? 'http://localhost:8080/api' : 'https://yunduanyingyue.tmichi1001.workers.dev/api';
+
+// API 基础路径 / API Base URL
+// ⚠️⚠️⚠️ 警告 / WARNING ⚠️⚠️⚠️
+// 如果您是此项目的 Fork 用户或部署在自己的服务器上，
+// 您必须修改下方的 API_BASE 为您自己的后端地址！
+// 严禁直接使用默认的 Cloudflare 地址，否则可能会被封禁。
+// If you are deploying this project, you MUST change the API_BASE below.
+
+// Cloudflare Worker 后端地址
+const API_BASE = 'https://yunduanyingyue.tmichi1001.workers.dev/api';
 
 // 初始化 MusicAPI 的 Worker 端点
 if (typeof MusicAPI !== 'undefined') {
@@ -24,10 +31,11 @@ const AuthService = {
                 body: JSON.stringify({ username, password })
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Login failed');
+            if (!res.ok) throw new Error(data.error || '登录失败');
 
-            // Save user info (which acts as token for now)
+            // 保存用户信息 (目前作为 token 使用)
             localStorage.setItem('currentUser', JSON.stringify(data.user));
+
             return data.user;
         } catch (e) {
             console.error('Login Error:', e);
@@ -43,7 +51,7 @@ const AuthService = {
                 body: JSON.stringify({ username, password })
             });
             const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Register failed');
+            if (!res.ok) throw new Error(data.error || '注册失败');
             return data;
         } catch (e) {
             console.error('Register Error:', e);
@@ -53,7 +61,7 @@ const AuthService = {
 
     logout() {
         localStorage.removeItem('currentUser');
-        // Clear data cache
+        // 清除数据缓存
         DataService.clearCache();
     },
 
@@ -114,14 +122,14 @@ const DataService = {
             const parsed = MusicAPI.parsePlaylistUrl(url);
             if (!parsed) throw new Error("无法解析链接，请检查格式是否正确");
 
-            // Deduplication Check
+            // 去重检查
             const existing = this.playlists.find(p =>
                 (p.platform === parsed.source || p.source === parsed.source) &&
                 (String(p.externalId) === String(parsed.id) || String(p.external_id) === String(parsed.id))
             );
 
             if (existing) {
-                console.log("Found existing playlist for sync:", existing.name);
+                console.log("发现已存在的同步歌单:", existing.name);
                 return await this.syncExistingPlaylist(existing);
             }
 
@@ -156,7 +164,7 @@ const DataService = {
 
     async syncExistingPlaylist(pl) {
         try {
-            // Determine source/id from plyalist object
+            // 从歌单对象确定 来源/ID
             const platform = pl.platform || pl.source;
             const extId = pl.externalId || pl.external_id;
 
@@ -165,18 +173,18 @@ const DataService = {
                 return false;
             }
 
-            // Quietly fetch new songs
+            // 静默获取新歌曲
             const result = await MusicAPI.getPlaylistSongs(platform, extId);
             if (!result || !result.tracks) {
-                console.warn(`Empty sync result for ${pl.name}`);
+                console.warn(`歌单 ${pl.name} 同步结果为空`);
                 return false;
             }
 
             const freshSongs = result.tracks.map(s => this.cleanSong(s));
 
-            // Use Backend Incremental Sync Endpoint
-            // This endpoint handles adding new songs AND removing deleted songs (while preserving manual adds)
-            // Clean name before sending to prevent prefix accumulation
+            // 使用后端增量同步端点
+            // 该端点处理添加新歌曲并移除已删除的歌曲（同时保留手动添加的歌曲）
+            // 发送前清理名称以防止前缀堆积
             let cleanPlName = pl.name;
             const prefixes = ['网易:', 'QQ:', '酷我:', 'netease:', 'qq:', 'kuwo:', '网易：', '酷我：', 'QQ：'];
             let found = true;
@@ -204,7 +212,7 @@ const DataService = {
             if (!res.ok) throw new Error(data.error || '同步失败');
 
             UI.showToast(`歌单 "${pl.name}" 同步完成`, 'success');
-            await this.fetchPlaylists(); // Refresh local list to show changes
+            await this.fetchPlaylists(); // 刷新本地列表以显示更改
             return true;
         } catch (e) {
             console.error("Sync Existing Error:", e);
@@ -216,21 +224,21 @@ const DataService = {
     checkAutoSync() {
         const LAST_SYNC_KEY = 'last_daily_sync_date';
         const now = new Date();
-        const beijingTime = new Date(now.getTime() + (480 + now.getTimezoneOffset()) * 60000); // Rough conversion if local is not BJ
-        // User's browser time + 8 offset... 
-        // Actually, just check if it's past 8 AM local time (if user is in China) or checking strict BJ time.
-        // User asked "China Beijing Time 8 AM".
-        // I will trust the user's system time if they are in China, or close enough.
-        // Let's use simple logic: If (Hours >= 8) and (LastSyncDate != TodayDateStr)
+        const beijingTime = new Date(now.getTime() + (480 + now.getTimezoneOffset()) * 60000); // 如果本地不是北京时间，粗略转换
+        // 用户浏览器时间 + 8 小时偏移...
+        // 实际上，只需检查本地时间是否超过上午 8 点（如果用户在中国），或者检查严格的北京时间。
+        // 用户要求 "中国北京时间上午 8 点"。
+        // 我们信任用户的系统时间，如果他们在中国，或者足够接近。
+        // 使用简单逻辑: 如果 (小时 >= 8) 且 (最后同步日期 != 今天日期字符串)
 
         const todayStr = beijingTime.toISOString().split('T')[0];
         const lastSync = localStorage.getItem(LAST_SYNC_KEY);
 
         if (beijingTime.getHours() >= 8 && lastSync !== todayStr) {
-            console.log("Triggering Daily Auto Sync...");
+            console.log("触发每日自动同步...");
             localStorage.setItem(LAST_SYNC_KEY, todayStr);
 
-            // Sync all imported playlists
+            // 同步所有导入的歌单
             this.playlists.forEach(pl => {
                 if ((pl.platform || pl.source) && (pl.externalId || pl.external_id)) {
                     this.syncExistingPlaylist(pl);
@@ -247,15 +255,15 @@ const DataService = {
     },
 
     /**
-     * Import playlists from external platforms
-     * @param {string} platform - Platform name (netease, qq, etc.)
-     * @param {string} externalId - External playlist ID
-     * @param {Array} playlists - Array of playlist objects with id, name, and tracks
-     * @returns {Object} Response with success status
+     * 从外部平台导入歌单
+     * @param {string} platform - 平台名称 (netease, qq, 等)
+     * @param {string} externalId - 外部歌单 ID
+     * @param {Array} playlists - 包含 id, name, 和 tracks 的歌单对象数组
+     * @returns {Object} 带有成功状态的响应
      */
     async importPlaylists(platform, externalId, playlists) {
         try {
-            // Clean all track data before sending to backend
+            // 发送到后端前清理所有歌曲数据
             const cleanPlaylists = playlists.map(pl => ({
                 ...pl,
                 tracks: pl.tracks ? pl.tracks.map(s => this.cleanSong(s)) : []
@@ -327,12 +335,12 @@ const DataService = {
 
     async removeFavorite(uid) {
         // Optimistic update
-        this.favorites = this.favorites.filter(s => s.id !== uid && s.uid !== uid); // Handle both id formats
+        this.favorites = this.favorites.filter(s => s.id !== uid && s.uid !== uid); //处理两种 ID 格式
         try {
             await fetch(`${API_BASE}/favorites`, {
                 method: 'DELETE',
                 headers: { ...this.authHeader, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ id: uid }) // Backend expects 'id'
+                body: JSON.stringify({ id: uid }) // 后端期望 'id'
             });
         } catch (e) {
             console.error('Remove Favorite Error:', e);
@@ -355,14 +363,14 @@ const DataService = {
             return true;
         } catch (e) {
             console.error('Batch Remove Favorites Error:', e);
-            this.fetchFavorites(); // Refresh on error
+            this.fetchFavorites(); // 出错刷新
             throw e;
         }
     },
 
     isFavorite(song) {
         if (!song) return false;
-        // Check both ID types (local 'netease-123' vs backend stored)
+        // 检查两种 ID 类型 (本地 'netease-123' vs 后端存储的)
         return this.favorites.some(f => f.id === song.id || f.id === song.uid);
     },
 
@@ -374,7 +382,7 @@ const DataService = {
             });
             if (res.ok) {
                 const list = await res.json();
-                // Everything is already sorted DESC by backend
+                // 后端已按倒序排序
                 this.playlists = list;
             }
         } catch (e) {
@@ -392,7 +400,7 @@ const DataService = {
             });
             if (res.ok) {
                 const pl = await res.json();
-                this.playlists.unshift(pl); // Add to top
+                this.playlists.unshift(pl); // 添加到顶部
                 return pl;
             }
         } catch (e) {
@@ -437,10 +445,10 @@ const DataService = {
 
         if (!pl) return false;
 
-        // Check for duplicate using both id and uid
+        // 使用 id 和 uid 检查重复
         if (pl.tracks.some(t => (song.id && t.id === song.id) || (song.uid && t.uid === song.uid))) return false;
 
-        // Optimistic update - add to top for DESC newest-first order
+        // 乐观更新 - 添加到顶部以保持倒序 (最新优先)
         const tempTrack = { ...song };
         pl.tracks.unshift(tempTrack);
 
@@ -460,7 +468,7 @@ const DataService = {
             }
 
             const data = await res.json().catch(() => ({}));
-            throw new Error(data.error || 'Backend save failed');
+            throw new Error(data.error || '后端保存失败');
         } catch (e) {
             console.error('Add Song to Playlist Error:', e);
             pl.tracks = pl.tracks.filter(t => t !== tempTrack);
@@ -480,7 +488,7 @@ const DataService = {
         const newSongs = songs.filter(s => !pl.tracks.some(t => t.id === s.id));
         if (newSongs.length === 0) return 0;
 
-        // Optimistic - add to top for DESC newest-first order
+        // 乐观更新 - 添加到顶部以保持倒序 (最新优先)
         pl.tracks.unshift(...newSongs);
 
         try {
@@ -536,7 +544,7 @@ const DataService = {
             return true;
         } catch (e) {
             console.error('Batch Remove Songs Error:', e);
-            this.fetchPlaylists(); // Refresh on error
+            this.fetchPlaylists(); // 出错刷新
             throw e;
         }
     },

@@ -61,4 +61,38 @@ public class FavoriteController {
         favoriteService.removeFavorite(userId, songId);
         return ApiResponse.success(null);
     }
+    @PostMapping("/favorites/batch")
+    public ApiResponse addBatchFavorites(
+            @RequestHeader("Authorization") String auth,
+            @RequestBody Map<String, Object> body) {
+        Long userId = Long.parseLong(auth.split(" ")[1]);
+        try {
+            List<Object> songs = (List<Object>) body.get("songs");
+            List<Map<String, String>> list = new ArrayList<>();
+            for (Object s : songs) {
+                Map<String, Object> sm = (Map<String, Object>) s;
+                String songId = sm.get("id").toString();
+                String json = objectMapper.writeValueAsString(s);
+                list.add(Map.of("id", songId, "json", json));
+            }
+            favoriteService.addBatchFavorites(userId, list);
+            return ApiResponse.success(null);
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
+
+    @DeleteMapping("/favorites/batch")
+    public ApiResponse removeBatchFavorites(
+            @RequestHeader("Authorization") String auth,
+            @RequestBody Map<String, Object> body) {
+        Long userId = Long.parseLong(auth.split(" ")[1]);
+        try {
+            List<String> ids = (List<String>) body.get("ids");
+            favoriteService.removeBatchFavorites(userId, ids);
+            return ApiResponse.success(null);
+        } catch (Exception e) {
+            return ApiResponse.error(e.getMessage());
+        }
+    }
 }

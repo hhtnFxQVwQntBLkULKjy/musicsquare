@@ -7,4 +7,7 @@ import java.util.List;
 
 public interface PlayHistoryRepository extends JpaRepository<PlayHistory, Long> {
     List<PlayHistory> findByUserIdOrderByPlayedAtDesc(Long userId, Pageable pageable);
+
+    void deleteByUserIdAndId(Long userId, Long id);
 }
+

@@ -25,4 +25,16 @@ public class HistoryService {
         history.setPlayedAt(System.currentTimeMillis());
         playHistoryRepository.save(history);
     }
+
+    @org.springframework.transaction.annotation.Transactional
+    public void batchDeleteHistory(Long userId, List<String> ids) {
+        for (String id : ids) {
+            try {
+                Long historyId = Long.parseLong(id);
+                playHistoryRepository.deleteByUserIdAndId(userId, historyId);
+            } catch (NumberFormatException e) {
+                // Skip invalid IDs
+            }
+        }
+    }
 }

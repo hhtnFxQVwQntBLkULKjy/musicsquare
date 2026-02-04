@@ -1,8 +1,8 @@
 const MusicAPI = {
-    // Configuration
+    // 配置
     sources: ['netease', 'qq', 'kuwo'],
 
-    // API Endpoints - 使用你的 Worker 域名
+    // API 端点 - ⚠️ 注意: 这里的 worker 会在 service.js 中被初始化覆盖
     endpoints: {
         worker: '', // 将在初始化时设置为 API_BASE
         netease: 'https://netease-cloud-music-api-eight-rho.vercel.app',
@@ -10,8 +10,8 @@ const MusicAPI = {
 
     searchCache: new Map(),
 
-    // Quality preference - determines starting point for quality degradation
-    // Options: 'flac24bit', 'flac', '320k', '128k'
+    // 音质偏好 - 决定降级策略的起始点
+    // 选项: 'flac24bit', 'flac', '320k', '128k'
     get preferredQuality() {
         return localStorage.getItem('preferredQuality') || 'flac24bit';
     },
@@ -19,12 +19,12 @@ const MusicAPI = {
         localStorage.setItem('preferredQuality', val);
     },
 
-    // Build quality array starting from preferred quality
+    // 从偏好音质开始构建降级链
     getQualityChain(preferred) {
         const allQualities = ['flac24bit', 'flac', '320k', '128k'];
         const idx = allQualities.indexOf(preferred);
-        if (idx === -1) return allQualities; // fallback to all
-        return allQualities.slice(idx); // from preferred onwards
+        if (idx === -1) return allQualities; // 回退到全部尝试
+        return allQualities.slice(idx); // 从偏好音质开始尝试
     },
 
     // 初始化 Worker 端点
@@ -40,29 +40,29 @@ const MusicAPI = {
             url.includes('localhost') ||
             url.includes('127.0.0.1')) return url;
 
-        // Force HTTPS for NetEase and QQ (they have valid certs)
+        // 强制网易云和QQ音乐使用 HTTPS (因为它们有有效的证书)
         if (url.startsWith('http://') && (url.includes('music.126.net') || url.includes('qq.com'))) {
             url = url.replace('http://', 'https://');
         }
 
-        // For Kuwo, Force HTTP when sending to proxy because their SSL cert is broken (fixes 526 errors)
+        // 针对酷我: 发送给代理时强制使用 HTTP (因为它们的 SSL 证书有问题，修复 526 错误)
         if (url.includes('kuwo.cn') && url.startsWith('https://')) {
             url = url.replace('https://', 'http://');
         }
 
-        // HTTPS netease CDN works without proxy
+        // 网易云 HTTPS CDN 不需要代理即可访问
         if (url.includes('music.126.net') && url.startsWith('https://')) {
             return url;
         }
 
-        // Check if URL needs proxy based on domain patterns
+        // 根据域名模式检查是否需要代理
         const needProxyByDomain = url.includes('126.net') ||
             url.includes('qq.com') ||
             url.includes('kuwo.cn') ||
             url.includes('kwcdn.kuwo.cn') ||
             url.includes('sycdn.kuwo.cn');
 
-        // Check if it's an API URL for kuwo source
+        // 检查是否为酷我的 API URL
         const isKuwoApiUrl = url.includes('source=kuwo') || source === 'kuwo';
 
         if (needProxyByDomain || isKuwoApiUrl) {
@@ -143,7 +143,7 @@ const MusicAPI = {
                 queryString += `&${key}=${encodeURIComponent(params[key])}`;
             }
 
-            // QQ Music specific callback parameter names
+            // QQ音乐特定的回调参数名
             const targetUrl = `${url}&jsonpCallback=${callbackName}&callback=${callbackName}${queryString}`;
 
             window[callbackName] = (data) => {
@@ -196,7 +196,7 @@ const MusicAPI = {
                 try { data = JSON.parse(data); } catch (e) { }
             }
 
-            // search_for_qq_cp returns data.song.list
+            // search_for_qq_cp 返回 data.song.list
             const songList = data?.data?.song?.list;
             if (!songList || !Array.isArray(songList)) return [];
 
@@ -279,7 +279,7 @@ const MusicAPI = {
         }
     },
 
-    // Timeout helper
+    // 超时助手函数
     timeoutPromise(promise, ms) {
         return new Promise((resolve, reject) => {
             const timeoutId = setTimeout(() => {
@@ -301,7 +301,7 @@ const MusicAPI = {
     async aggregateSearch(keyword, signal = null) {
         if (!keyword) return [];
 
-        const TIMEOUT = 15000; // 15s timeout per platform
+        const TIMEOUT = 15000; // 每个平台 15s 超时
 
         const searchPromises = [
             this.timeoutPromise(this.search(keyword, 'netease', 1, 10, signal), TIMEOUT),
@@ -310,12 +310,12 @@ const MusicAPI = {
         ];
 
         try {
-            // Use allSettled to ensure we get results even if some fail
+            // 使用 allSettled 确保即使某些请求失败也能获取部分结果
             const resultsSettled = await Promise.allSettled(searchPromises);
 
             const results = resultsSettled.map(r => {
                 if (r.status === 'fulfilled') return r.value;
-                // Log warning but don't fail
+                // 记录警告但不中断
                 console.warn('Search platform failed or timed out:', r.reason);
                 return [];
             });
@@ -336,13 +336,13 @@ const MusicAPI = {
         }
     },
 
-    // URL cache to avoid repeated API requests
+    // URL 缓存，避免重复请求 API
     urlCache: new Map(),
 
     // 获取歌曲详情 - 使用 TuneHub 解析
     async getSongDetails(track) {
         try {
-            // Check cache first
+            // 优先检查缓存
             const cacheKey = `${track.source}-${track.songId || track.id}`;
             if (this.urlCache.has(cacheKey)) {
                 const cached = this.urlCache.get(cacheKey);
@@ -409,7 +409,7 @@ const MusicAPI = {
 
             if (parseResult) {
                 track.url = parseResult.url || track.url;
-                // For kuwo, proxy the cover URL due to SSL cert issues
+                // 针对酷我，由于 SSL 证书问题，代理封面 URL
                 let coverUrl = parseResult.cover || track.cover;
                 if (coverUrl && track.source === 'kuwo') {
                     coverUrl = this.getProxyUrl(coverUrl, 'kuwo');
@@ -424,7 +424,7 @@ const MusicAPI = {
                 }
             }
 
-            // Cache the result if we have a URL
+            // 如果获取到了 URL，缓存结果
             if (track.url) {
                 if (this.urlCache.size > 200) {
                     const firstKey = this.urlCache.keys().next().value;
@@ -493,10 +493,10 @@ const MusicAPI = {
         if (json.code !== 200 || !json.playlist) return { name: '未知歌单', tracks: [] };
 
         const playlist = json.playlist;
-        // Remove limit, get all trackIds
+        // 移除限制，获取所有 trackIds
         const trackIds = playlist.trackIds ? playlist.trackIds.map(t => t.id) : [];
 
-        // Batch fetch details (chunk size 50 to avoid URL length limit)
+        // 批量获取详情 (分块大小 50，避免 URL 过长)
         let tracks = [];
         if (trackIds.length > 0) {
             const CHUNK_SIZE = 50;
@@ -505,7 +505,7 @@ const MusicAPI = {
                 chunks.push(trackIds.slice(i, i + CHUNK_SIZE));
             }
 
-            // Fetch chunks (Sequential to ensure stability)
+            // 获取分块数据 (顺序执行以保证稳定性)
             const detailMap = new Map();
             for (const chunkIds of chunks) {
                 try {
@@ -518,7 +518,7 @@ const MusicAPI = {
                 } catch (e) { console.error("Chunk fetch failed", e); }
             }
 
-            // Map back to maintain trackIds order
+            // 重新映射以保持 trackIds 顺序
             tracks = trackIds.map(tid => {
                 const item = detailMap.get(String(tid));
                 if (!item) return null;
@@ -541,7 +541,7 @@ const MusicAPI = {
     },
 
     async _getPlaylistQQ(playlistId) {
-        // Use verified official API with large limit (10000) to ensure full import
+        // 使用经过验证的官方 API，使用大额限制 (10000) 确保完全导入
         const targetUrl = `https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_byids_cp.fcg?type=1&json=1&utf8=1&onlysong=0&disstid=${playlistId}&format=json&song_begin=0&song_num=10000`;
 
         const url = `${this.endpoints.worker}/tunehub/request`;
@@ -562,7 +562,7 @@ const MusicAPI = {
             const res = await fetch(url, fetchOptions);
             const result = await res.json();
 
-            // Handle worker proxy response wrapper
+            // 处理 Worker 代理响应包装
             let data = result;
             if (result.success && result.data) {
                 data = result.data;
@@ -595,7 +595,7 @@ const MusicAPI = {
     },
 
     async _getPlaylistKuwo(playlistId) {
-        // Increase limit to 2000
+        // 增加限制到 2000
         const targetUrl = `http://nplserver.kuwo.cn/pl.svc?op=getlistinfo&pid=${playlistId}&pn=0&rn=2000&encode=utf8&keyset=pl2012&vipver=MUSIC_9.0.5.0_W1&newver=1`;
         const url = `${this.endpoints.worker}/tunehub/request`;
         const res = await fetch(url, {

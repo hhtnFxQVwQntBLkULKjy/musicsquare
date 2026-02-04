@@ -1,8 +1,10 @@
 spring:
   datasource:
+    # 数据库连接配置
+    # ⚠️⚠️⚠️ 部署时请务必修改下面的密码！
     url: jdbc:mysql://localhost:3306/musicsquare?useUnicode=true&characterEncoding=utf-8&useSSL=false&serverTimezone=GMT%2B8&allowPublicKeyRetrieval=true
     username: root
-    password: 123456
+    password: 123456 # <--- 请修改为您的数据库密码
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
@@ -13,6 +15,13 @@ spring:
         dialect: org.hibernate.dialect.MySQLDialect
 
 server:
-  port: 8080
+  port: 3459
   servlet:
     context-path: /
+
+# 第三方 API 配置
+music:
+  netease:
+    # 网易云音乐 API 地址 (可以是您自己部署的，也可以是公共的)
+    # 建议使用 https://github.com/Binaryify/NeteaseCloudMusicApi 部署
+    api-base: https://netease-cloud-music-api-eight-rho.vercel.app
