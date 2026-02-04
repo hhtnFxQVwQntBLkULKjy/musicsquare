@@ -111,7 +111,7 @@ README 中的默认 API 代理地址仅供演示，**严禁滥用**。若发现�
 | **后端 A** | Cloudflare Workers (V8 Runtime) |
 | **后端 B** | Java Spring Boot (v3.x) |
 | **数据库** | Cloudflare D1 / MySQL |
-| **数据源** | [TuneHub API](https://api.tunefree.fun/) + 自建跨域代理 |
+| **数据源** | [TuneHub API](https://tunehub.sayqz.com) + 自建跨域代理 |
 
 ---
 
@@ -129,7 +129,7 @@ README 中的默认 API 代理地址仅供演示，**严禁滥用**。若发现�
 
 ## 🙏 致谢
 
-- [TuneHub API](https://api.tunefree.fun/) - 音乐数据接口
+- [TuneHub API](https://tunehub.sayqz.com) - 音乐数据接口
 - [FontAwesome](https://fontawesome.com/) - 图标库
 - [Cloudflare](https://cloudflare.com/) - 边缘计算平台
 - [GitHub Pages](https://pages.github.com/) - 静态网站托管
