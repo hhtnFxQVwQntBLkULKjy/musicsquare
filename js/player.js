@@ -552,9 +552,18 @@ class MusicPlayer {
             this.convolver.buffer = this.createImpulseResponse(1.5, 1.5);
             this.reverbGain = this.audioCtx.createGain();
             this.reverbGain.gain.value = 0;
+            this.compressor = this.audioCtx.createDynamicsCompressor();
+            this.compressor.threshold.value = -24;
+            this.compressor.knee.value = 30;
+            this.compressor.ratio.value = 12;
+            this.compressor.attack.value = 0.003;
+            this.compressor.release.value = 0.25;
+
             this.masterGain = this.audioCtx.createGain();
             this.source.connect(this.masterGain);
-            this.masterGain.connect(this.audioCtx.destination);
+            // Connect Master -> Compressor -> Destination
+            this.masterGain.connect(this.compressor);
+            this.compressor.connect(this.audioCtx.destination);
             this.isAudioContextConnected = true;
         } catch (e) {
             console.error("Web Audio API initialization failed", e);
@@ -586,9 +595,13 @@ class MusicPlayer {
             this.convolver.disconnect();
             this.reverbGain.disconnect();
             this.masterGain.disconnect();
+
+            // Reconnect base chain
+            this.masterGain.disconnect();
+            this.masterGain.connect(this.compressor);
+
             if (mode === 'original') {
                 this.source.connect(this.masterGain);
-                this.masterGain.connect(this.audioCtx.destination);
                 return;
             }
             this.source.connect(this.lowFilter);
@@ -599,15 +612,16 @@ class MusicPlayer {
                 this.highFilter.gain.value = 3;
                 lastNode.connect(this.masterGain);
             } else if (mode === 'speaker') {
-                this.lowFilter.gain.value = 6;
-                this.highFilter.gain.value = 6;
+                // Optimized values to prevent clipping noise
+                this.lowFilter.gain.value = 4; // Reduced from 6
+                this.highFilter.gain.value = 4; // Reduced from 6
                 lastNode.connect(this.masterGain);
                 lastNode.connect(this.convolver);
                 this.convolver.connect(this.reverbGain);
                 this.reverbGain.connect(this.masterGain);
-                this.reverbGain.gain.value = 0.4;
+                this.reverbGain.gain.value = 0.25; // Reduced reverb from 0.4
             }
-            this.masterGain.connect(this.audioCtx.destination);
+            // MasterGain is already connected to compressor -> destination
         } catch (err) {
             console.error("Failed to set audio effect:", err);
             try {
