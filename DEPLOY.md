@@ -1,190 +1,130 @@
-# MusicSquare 部署手记
+# MusicSquare 极简部署指南
 
-> [!CAUTION]
-> **请务必修改配置**
-> 
-> 本项目默认指向演示用的后端。部署时，**必须**将 `js/service.js` 中的 API 地址修改为您自己的地址（无论是 Cloudflare Worker 还是 Java 后端），否则无法正常使用。
-
-本文档指导您如何在自己的环境中部署 MusicSquare 的后端和前端。
-
-## 1. 部署方式选择
-
-您可以选择以下两种方式之一来提供后端服务：
-
-1.  **Cloudflare Worker (推荐，轻量级)**: 不需要服务器，使用 Cloudflare 免费额度，适合个人使用。
-2.  **Java 后端 (Spring Boot)**: 需要一台云服务器 (VPS)，功能最完整，支持 MySQL 数据库存储用户数据。
+本文档提供两种部署方案，请根据您的需求选择 **其中一种**。
 
 ---
 
-## 2. 前端配置修改 (必须执行)
+## 方案一：免费极简部署 (GitHub Pages + Cloudflare)
+**特点**：完全免费、不需要服务器、不需要安装命令行工具 (Node.js/Java)，直接在网页上点点点即可完成。
+**架构**：前端 (GitHub Pages) + 后端 (Cloudflare Worker) + 数据库 (Cloudflare D1)。
 
-无论您选择哪种后端部署方式，您都 **必须** 修改前端代码中的配置文件。
+### 第一步：后端部署 (Cloudflare)
 
-1.  打开项目文件: `js/service.js`
-2.  找到文件顶部的配置区域：
+1.  **准备账号**
+    *   注册并登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)。
 
-    ```javascript
-    // API 基础路径
-    // Cloudflare Worker 后端地址
-    const API_BASE = '你的Cloudflare Worker 后端地址'; 
-    ```
+2.  **创建数据库 (D1)**
+    *   在 Cloudflare后台左侧菜单，点击 **Workers & Pages** -> **D1 SQL Database**。
+    *   点击 **Create**，数据库名称填 `musicsquare_db`，点击 **Create**。
+    *   创建成功后，点击进入数据库详情页，点击 **Console** (控制台) 标签。
+    *   打开本地文件 `backend/schema.sql`，全选复制内容，粘贴到网页的控制台输入框中，点击 **Execute**。
+    *   *(提示：看到 success 表示表结构创建成功)*
 
-3.  **如果您使用 Cloudflare Worker**:
-    -   请将 `'https://yunduanyingyue.tmichi1001.workers.dev/api'` 替换为您自己部署的 Worker 地址。
+3.  **创建后端服务 (Worker)**
+    *   点击左侧 **Workers & Pages** -> **Overview** -> **Create Application**。
+    *   点击 **Create Worker** -> 名字随便填 (例如 `pikachu-music`) -> **Deploy**。
+    *   点击 **Edit code** 进入在线编辑器。
+    *   **重点**：打开本地 `backend/worker.js`，全选复制，**覆盖** 在线编辑器里的所有代码，点击右上角 **Save and Deploy**。
 
-4.  **如果您使用 Java 后端**:
-    -   请将 `API_BASE` 修改为您服务器的公网 IP 或域名 (例如 `'http://123.45.67.89:3459/api'`)。
+4.  **绑定数据库与变量**
+    *   回到 Worker 的详情页 (Settings)。
+    *   **绑定数据库**: 点击 **Settings** -> **Variables** -> 向下滚动到 **D1 Database Bindings** -> 点击 **Add binding**。
+        *   Variable name 填: `DB` (必须是大写)
+        *   D1 database 选择: `musicsquare_db`
+    *   **设置密钥**: 向上滚动到 **Environment Variables** -> 点击 **Add variable**。
+        *   Variable name 填: `TUNEHUB_API_KEY`
+        *   Value 填: 您的 TuneHub API Key (前往 https://tunehub.sayqz.com 获取)
+    *   **最后**: 点击 **Deploy** (或 Save and Deploy) 确保设置生效。
+
+5.  **获取后端地址**
+    *   在 Worker 详情页顶部，找到 **Preview** 下方的链接 (例如 `https://pikachu-music.xxx.workers.dev`)。
+    *   复制这个链接，这就是您的**后端 API 地址**。
+
+### 第二步：前端部署 (GitHub Pages)
+
+1.  **修改配置**
+    *   打开本地 `js/service.js`。
+    *   修改 `API_BASE` 为上一步获取的 `https://.../api` (注意要在末尾加上 `/api`)。
+
+2.  **上传代码**
+    *   将整个项目上传到您的 GitHub 仓库。
+
+3.  **开启 Pages**
+    *   在 GitHub 仓库 -> Settings -> Pages。
+    *   Source 选择 `Deploy from a branch`，Branch 选择 `main` (或 master) -> `/ (root)` -> Save。
+    *   等待几分钟，GitHub 会给您一个访问链接，部署完成！
 
 ---
 
-## 3. Java 后端部署指南 (适用于云服务器)
+## 方案二：云服务器部署 (Windows/Linux)
+**特点**：数据私有、性能更强、适合有云服务器 (VPS) 的用户。
+**架构**：Java 后端 + MySQL 数据库。
 
-如果您拥有一台云服务器 (Linux)，请按照以下步骤部署 Java 后端。
+### 第一步：环境与代码获取
 
-### 3.1 环境准备 (Ubuntu/Debian 示例)
+1.  **安装软件**: 确保服务器安装了 `Java 17+` (JDK), `MySQL 8.0+`, `git`, `Maven`, `PM2`。
+2.  **获取代码**:
+    *   在服务器上拉取项目代码：
+        ```bash
+        cd /opt
+        git clone https://github.com/7TangDaGui/musicsquare.git
+        cd musicsquare
+        ```
+3.  **导入数据库**:
+    *   登录 MySQL，创建一个名为 `musicsquare` 的数据库。
+    *   导入 `backend/mysql_schema.sql` 文件。
 
-在服务器上执行以下命令安装必要软件：
+### 第二步：后端部署 (Java)
 
-```bash
-# 更新系统软件源
-sudo apt update && sudo apt upgrade -y
+1.  **修改配置**:
+    *   打开 `java-backend/src/main/resources/application.yml`。
+    *   修改数据库密码 (`password`)。
+    *   确认端口配置为 `3459` (默认已配置)。
 
-# 1. 安装 JDK 17 (后端运行环境)
-sudo apt install -y openjdk-17-jdk
-# 验证安装
-java -version
+2.  **打包运行**:
+    *   在 `java-backend` 目录执行打包 (Maven): `mvn clean package`。
+    *   得到 `target/music-backend-1.0.0.jar`。
+    *   **使用 PM2 后台运行** (在 jar 包所在目录执行):
+        ```bash
+        pm2 start java --name "music-backend" -- -jar music-backend-1.0.0.jar --server.port=3459
+        ```
+    *   **常用 PM2 命令**:
+        *   启动: `pm2 start java [...]` (见上)
+        *   查看状态: `pm2 status`
+        *   查看日志: `pm2 logs music-backend`
+        *   重启服务: `pm2 restart music-backend`
+        *   停止服务: `pm2 stop music-backend`
+        *   设置开机自启: `pm2 startup` (根据提示执行命令) -> `pm2 save`
 
-# 2. 安装 Maven (用于编译打包，也可以在本地打包后只上传 jar)
-sudo apt install -y maven
+### 第三步：前端部署 (Nginx)
 
-# 3. 安装 MySQL 8.0+ (数据库)
-sudo apt install -y mysql-server
-# 启动 MySQL
-sudo systemctl start mysql
-sudo systemctl enable mysql
+云服务器部署前端**必须**使用 Web 服务器。
 
-# 4. 安装 Nginx (Web 服务器)
-sudo apt install -y nginx
+1.  **修改前端配置**:
+    *   在服务器上修改 `js/service.js`，将 `API_BASE` 改为 `http://服务器公网IP:3459/api`。
 
-```
-
-### 3.2 数据库初始化
-
-1.  **设置 MySQL root 密码**:
-    ```bash
-    sudo mysql_secure_installation
-    # 按照提示设置密码，建议选择强密码
-    ```
-
-2.  **创建数据库和用户**:
-    登录 MySQL: `sudo mysql -u root -p`
-    
-    ```sql
-    -- 创建数据库
-    CREATE DATABASE IF NOT EXISTS musicsquare DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-    
-    -- (可选) 创建单独的用户并授权，比直接用 root 更安全
-    CREATE USER 'music_user'@'localhost' IDENTIFIED BY '您的强密码';
-    GRANT ALL PRIVILEGES ON musicsquare.* TO 'music_user'@'localhost';
-    FLUSH PRIVILEGES;
-    
-    USE musicsquare;
-    -- 在此执行 backend/mysql_schema.sql 中的 SQL 建表语句
-    ```
-
-### 3.3 Java 后端配置与打包
-
-1.  **修改配置**: 
-    在本地项目 `java-backend/src/main/resources/application.yml` 中：
-    -   修改 `spring.datasource.password` 为您在 3.2 步设置的密码。
-    -   如果使用了单独用户，也要修改 `username`。
-
-2.  **编译打包**:
-    在 `java-backend` 目录下执行：
-    ```bash
-    mvn clean package -DskipTests
-    ```
-    成功后会在 `target/` 目录下生成 `music-backend-1.0.0.jar`。
-
-3.  **上传**:
-    使用 SCP 或 SFTP 将 jar 包上传到服务器，例如 `/opt/musicsquare/app.jar`。
-
-### 3.4 使用 Systemd 管理 Java 进程 (推荐)
-
-不要只使用 `java -jar` 直接运行，容易断开。建议创建系统服务。
-
-1.  创建服务文件: `sudo nano /etc/systemd/system/musicsquare.service`
-2.  写入以下内容 (注意修改路径和用户):
-
-    ```ini
-    [Unit]
-    Description=MusicSquare Backend Service
-    After=syslog.target network.target mysql.service
-
-    [Service]
-    User=root
-    # 您的 jar 包路径
-    ExecStart=/usr/bin/java -jar /opt/musicsquare/app.jar
-    SuccessExitStatus=143
-    Restart=always
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-    ```
-
-3.  启动服务:
-    ```bash
-    sudo systemctl daemon-reload
-    sudo systemctl start musicsquare
-    sudo systemctl enable musicsquare
-    # 查看状态
-    sudo systemctl status musicsquare
-    ```
-
-### 3.5 部署前端并配置 Nginx
-
-1.  **上传前端代码**:
-    将本项目根目录下的所有 HTML/CSS/JS 文件上传到服务器 `/var/www/musicsquare/`。
-
-2.  **配置 Nginx**:
-    编辑 `/etc/nginx/sites-available/default`:
-    ```nginx
-    server {
-        listen 80;
-        server_name your-domain.com; # 您的域名或 IP
-
-        # 前端静态文件
-        location / {
-            root /var/www/musicsquare;
-            index index.html;
-            try_files $uri $uri/ /index.html;
+2.  **配置 Nginx (直接复制)**:
+    *   编辑配置: `sudo nano /etc/nginx/sites-available/default`
+    *   **清空原内容，粘贴以下配置**:
+        ```nginx
+        server {
+            listen 80;
+            server_name _; # 匹配所有域名和IP
+            
+            # 指向我们刚 Clone 下来的项目目录
+            location / {
+                root /opt/musicsquare;
+                index index.html;
+                try_files $uri $uri/ /index.html;
+            }
         }
+        ```
+    *   重启生效: `sudo systemctl restart nginx`
 
-        # 后端 API 代理 (可选，如果前端 API_BASE 填写的 ip:3459 则不需要此块，建议使用 Nginx 反代)
-        location /api/ {
-            proxy_pass http://127.0.0.1:3459/api/;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-        }
-    }
-    ```
-    
-3.  **重启 Nginx**:
-    ```bash
-    sudo nginx -t
-    sudo systemctl restart nginx
-    ```
-
-## 4. Cloudflare Worker 部署指南
-
-如果您选择 Cloudflare Worker 作为后端：
-
-1.  请访问 GitHub 上的 `Cloudflare Worker` 相关项目 (例如 `netease-cloud-music-api` 的 worker 版本)，或者使用本项目提供的 `worker` 目录下的代码（如果有）。
-2.  部署到您的 Cloudflare 账号。
-3.  获取您的 Worker 域名，填入前端 `js/service.js` 的配置中。
+3.  **大功告成**:
+    *   现在打开浏览器，输入 `http://您的服务器IP` 即可访问完整应用！
 
 ---
-> [!NOTE]
-> 如果您遇到问题，请检查浏览器的控制台 (F12) -> Network 面板，查看 API 请求的 URL 是否正确指向了您的后端地址，而不是默认的演示地址。
-
+> **常见问题**
+> *   **端口不通？** 请检查云服务器的安全组/防火墙是否放行了 `3459` 端口。
+> *   **混合部署？** 也可以使用 GitHub Pages 托管前端，连接到您的云服务器后端 (需配置后端跨域/Nginx)。
