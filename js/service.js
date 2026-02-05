@@ -10,7 +10,7 @@
 // If you are deploying this project, you MUST change the API_BASE below.
 
 // Cloudflare Worker 后端地址
-const API_BASE = 'https://yunduanyingyue.tmichi1001.workers.dev/api';
+const API_BASE = 'https://pikachu-music.mayifeili2.workers.dev/api';
 
 // 初始化 MusicAPI 的 Worker 端点
 if (typeof MusicAPI !== 'undefined') {
